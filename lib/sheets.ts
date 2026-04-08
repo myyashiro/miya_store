@@ -34,9 +34,17 @@ function parseProducts(data: { table: { cols: { label: string }[]; rows: { c: ({
 
       const destaque = get('destaque');
 
+      const nome = String(get('nome') ?? '');
+      const slug = nome
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s-]/g, '')
+        .trim()
+        .replace(/\s+/g, '-');
+
       return {
-        nome: String(get('nome') ?? ''),
-        slug: String(get('slug') ?? ''),
+        nome,
+        slug,
         categoria: String(get('categoria') ?? ''),
         subcategoria: get('subcategoria') ? String(get('subcategoria')) : undefined,
         marca: get('marca') ? String(get('marca')) : undefined,
