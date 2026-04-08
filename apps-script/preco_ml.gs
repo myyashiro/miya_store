@@ -1,6 +1,6 @@
 // ============================================================
 // BUSCA DE PREÇOS — Mercado Livre
-// API pública, sem autenticação necessária.
+// Proxy no Vercel faz scraping da página do produto.
 // Trigger: a cada 6 horas (configurado em setup.gs)
 // ============================================================
 
@@ -17,25 +17,19 @@ function atualizarPrecosMl() {
     const ativo = String(row[col('ativo')]).toLowerCase();
     if (ativo !== 'true' && ativo !== 'sim') continue;
 
-    const url = row[col('link_ml')];
-    if (!url) continue;
-
-    // Usa link_ml_direto para extrair o ID (link limpo sem redirecionamento)
+    // Usa link_ml_direto se disponível, senão link_ml
     const urlDireto = row[col('link_ml_direto')];
-    const urlParaId = urlDireto ? String(urlDireto) : String(url);
-    // Prioriza wid=MLB... (item real), senão pega primeiro MLB no path
-    const matchWid = urlParaId.match(/[?&]wid=(MLB\d+)/);
-    const matchPath = urlParaId.match(/MLB\d+/);
-    const itemId = matchWid ? matchWid[1] : (matchPath ? matchPath[0] : null);
-    if (!itemId) continue;
+    const urlFallback = row[col('link_ml')];
+    const urlProduto = urlDireto ? String(urlDireto) : (urlFallback ? String(urlFallback) : null);
+    if (!urlProduto) continue;
 
     try {
-      // Chama o proxy no Vercel (ML bloqueia IPs do Apps Script diretamente)
-      const proxyUrl = `${ML_PROXY_URL}?secret=${REVALIDATE_SECRET}&id=${itemId}`;
+      // Envia a URL completa para o proxy no Vercel
+      const proxyUrl = `${ML_PROXY_URL}?secret=${REVALIDATE_SECRET}&url=${encodeURIComponent(urlProduto)}`;
       const resp = UrlFetchApp.fetch(proxyUrl, { muteHttpExceptions: true });
 
       if (resp.getResponseCode() !== 200) {
-        Logger.log(`ML proxy erro ${resp.getResponseCode()} (${itemId}): ${resp.getContentText()}`);
+        Logger.log(`ML proxy erro ${resp.getResponseCode()} (${urlProduto}): ${resp.getContentText()}`);
         continue;
       }
 
@@ -43,10 +37,11 @@ function atualizarPrecosMl() {
       const novoPreco = data.price ?? null;
 
       if (!novoPreco) {
-        Logger.log(`ML sem preço (${itemId})`);
+        Logger.log(`ML sem preço: ${urlProduto}`);
         continue;
       }
 
+      const nome = row[col('nome')] || urlProduto;
       const precoAtual = row[col('preco_ml')];
       const rowNum = i + 1;
 
@@ -55,10 +50,10 @@ function atualizarPrecosMl() {
       }
 
       sheet.getRange(rowNum, col('preco_ml') + 1).setValue(novoPreco);
-      Logger.log(`ML OK: ${itemId} → R$ ${novoPreco}`);
+      Logger.log(`ML OK: ${nome} → R$ ${novoPreco}`);
 
     } catch (e) {
-      Logger.log(`Erro ML (${itemId}): ${e.message}`);
+      Logger.log(`Erro ML (${urlProduto}): ${e.message}`);
     }
   }
 
