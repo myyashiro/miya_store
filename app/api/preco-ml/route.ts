@@ -2,32 +2,45 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-// Busca um app token via client_credentials (não precisa de login do usuário)
-async function getAppToken(): Promise<string> {
-  const clientId = process.env.ML_CLIENT_ID;
-  const clientSecret = process.env.ML_CLIENT_SECRET;
+async function buscarPrecoML(itemId: string): Promise<number | null> {
+  // Monta URL canônica do produto
+  const url = `https://www.mercadolivre.com.br/_p/${itemId}`;
 
-  if (!clientId || !clientSecret) {
-    throw new Error('ML_CLIENT_ID ou ML_CLIENT_SECRET não configurados no Vercel');
-  }
-
-  const resp = await fetch('https://api.mercadolibre.com/oauth/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
-    }),
+  const resp = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Accept-Language': 'pt-BR,pt;q=0.9',
+    },
+    redirect: 'follow',
+    next: { revalidate: 0 },
   });
 
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Falha ao obter token ML: ${text}`);
+  if (!resp.ok) return null;
+
+  const html = await resp.text();
+
+  // Tenta extrair preço do JSON-LD (Product schema)
+  const ldMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g);
+  if (ldMatch) {
+    for (const tag of ldMatch) {
+      try {
+        const json = JSON.parse(tag.replace(/<script[^>]*>/, '').replace('</script>', ''));
+        const items = Array.isArray(json) ? json : [json];
+        for (const item of items) {
+          const price = item?.offers?.price ?? item?.offers?.lowPrice ?? null;
+          if (price) return Number(price);
+        }
+      } catch {
+        // continua tentando os outros blocos
+      }
+    }
   }
 
-  const data = await resp.json();
-  return data.access_token as string;
+  // Fallback: extrai do __PRELOADED_STATE__ ou variável de preço inline
+  const priceMatch = html.match(/"price"\s*:\s*([\d.]+)/);
+  if (priceMatch) return Number(priceMatch[1]);
+
+  return null;
 }
 
 export async function GET(request: NextRequest) {
@@ -42,20 +55,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const token = await getAppToken();
+    const price = await buscarPrecoML(id);
 
-    const resp = await fetch(`https://api.mercadolibre.com/items/${id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      next: { revalidate: 0 },
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text();
-      return NextResponse.json({ error: `ML retornou ${resp.status}`, detail: text }, { status: resp.status });
+    if (!price) {
+      return NextResponse.json({ error: 'Preço não encontrado na página' }, { status: 404 });
     }
 
-    const data = await resp.json();
-    return NextResponse.json({ id, price: data.price ?? null });
+    return NextResponse.json({ id, price });
 
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
