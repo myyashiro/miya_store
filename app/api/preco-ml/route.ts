@@ -72,12 +72,31 @@ export async function GET(request: NextRequest) {
     if (price > 0) return NextResponse.json({ price, fonte: 'inline-script', url: urlLimpa });
   }
 
+  // --- Estratégia 4: __NEXT_DATA__ (Next.js SSR) ---
+  const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+  if (nextDataMatch) {
+    try {
+      const nextData = JSON.parse(nextDataMatch[1]);
+      // Caminho típico no ML: pageProps → initialState → pdp → product → price
+      const priceFromNext =
+        nextData?.props?.pageProps?.initialState?.pdp?.product?.price ??
+        nextData?.props?.pageProps?.price ??
+        null;
+      if (priceFromNext) {
+        return NextResponse.json({ price: Number(priceFromNext), fonte: 'next-data', url: urlLimpa });
+      }
+    } catch { /* segue */ }
+  }
+
   // Não encontrou — retorna debug se solicitado
   if (debug) {
+    const nextDataRaw = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
     return NextResponse.json({
       error: 'Preço não encontrado',
-      html_inicio: html.slice(0, 2000),
       ld_blocks_encontrados: ldBlocks.length,
+      has_next_data: !!nextDataRaw,
+      // Mostra só o início do __NEXT_DATA__ se existir, senão o início do HTML
+      amostra: nextDataRaw ? nextDataRaw[1].slice(0, 3000) : html.slice(0, 3000),
     });
   }
 
