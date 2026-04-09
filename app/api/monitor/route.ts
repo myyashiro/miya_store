@@ -144,11 +144,28 @@ async function updateSheetPrices(
   }
 }
 
+function extractMlbId(pathname: string): string | null {
+  const match = pathname.match(/MLB-?(\d+)/i);
+  return match ? `MLB${match[1]}` : null;
+}
+
 async function scrapePrice(url: string): Promise<{ price: number | null; debug: string }> {
   try {
     const parsed = new URL(url);
     if (!parsed.hostname.endsWith('mercadolivre.com.br')) {
       return { price: null, debug: 'hostname inválido' };
+    }
+
+    // Estratégia 1: API oficial do ML
+    const mlbId = extractMlbId(parsed.pathname);
+    if (mlbId) {
+      const apiRes = await fetch(`https://api.mercadolibre.com/items/${mlbId}`, { cache: 'no-store' });
+      if (apiRes.ok) {
+        const data = await apiRes.json() as { price?: number };
+        if (data.price && data.price > 0) return { price: data.price, debug: `ml-api (${mlbId})` };
+      } else {
+        return { price: null, debug: `ml-api http ${apiRes.status} (${mlbId})` };
+      }
     }
 
     const cleanUrl = `${parsed.origin}${parsed.pathname}`;
