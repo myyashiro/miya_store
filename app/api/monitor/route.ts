@@ -144,12 +144,30 @@ async function updateSheetPrices(
   }
 }
 
+function extractMlbId(url: string): string | null {
+  const match = url.match(/MLB-?(\d+)/i);
+  return match ? `MLB${match[1]}` : null;
+}
+
 async function scrapePrice(url: string): Promise<number | null> {
   try {
     const parsed = new URL(url);
     if (!parsed.hostname.endsWith('mercadolivre.com.br')) return null;
-    const cleanUrl = `${parsed.origin}${parsed.pathname}`;
 
+    // Estratégia 1: API oficial do ML (não bloqueia IP de data center)
+    const mlbId = extractMlbId(parsed.pathname);
+    if (mlbId) {
+      const apiRes = await fetch(`https://api.mercadolibre.com/items/${mlbId}`, {
+        cache: 'no-store',
+      });
+      if (apiRes.ok) {
+        const data = await apiRes.json() as { price?: number };
+        if (data.price && data.price > 0) return data.price;
+      }
+    }
+
+    // Estratégia 2: scraping HTML (fallback)
+    const cleanUrl = `${parsed.origin}${parsed.pathname}`;
     const res = await fetch(cleanUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -159,7 +177,6 @@ async function scrapePrice(url: string): Promise<number | null> {
       redirect: 'follow',
       cache: 'no-store',
     });
-
     if (!res.ok) return null;
     const html = await res.text();
 
@@ -187,7 +204,6 @@ async function scrapePrice(url: string): Promise<number | null> {
       if (price > 0) return price;
     }
 
-    // __NEXT_DATA__
     const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
     if (nextDataMatch) {
       try {
