@@ -207,7 +207,7 @@ for (const row of rows) {
 
   sheetUpdates.push({ rowNum: row.rowNum, precoNovo: price, precoAnterior: row.preco_ml });
 
-  const precoAnterior = row.preco_ml_anterior ?? row.preco_ml;
+  const precoAnterior = row.preco_ml;
   if (precoAnterior && price < precoAnterior) {
     const desconto = Math.round(((precoAnterior - price) / precoAnterior) * 100);
     console.log(`🔥 ${row.nome} — R$ ${precoAnterior} → R$ ${price} (-${desconto}%) [${debug}]`);
