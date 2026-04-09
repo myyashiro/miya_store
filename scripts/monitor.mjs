@@ -221,6 +221,15 @@ if (sheetUpdates.length > 0) {
   const accessToken = await getGoogleAccessToken();
   await updateSheetPrices(accessToken, sheetUpdates, precoMlCol, precoMlAntCol);
   console.log('Planilha atualizada.');
+
+  console.log('Revalidando site...');
+  const revalidateSecret = process.env.REVALIDATE_SECRET ?? 'miya2025';
+  const rv = await fetch(`https://miya-store.vercel.app/api/revalidate?secret=${revalidateSecret}`);
+  if (rv.ok) {
+    console.log('Site atualizado.');
+  } else {
+    console.log(`Revalidate falhou: ${rv.status}`);
+  }
 } else {
   console.log('\nNenhum preço obtido — planilha não foi atualizada.');
 }
