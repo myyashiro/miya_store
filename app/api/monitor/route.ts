@@ -187,6 +187,19 @@ async function scrapePrice(url: string): Promise<number | null> {
       if (price > 0) return price;
     }
 
+    // __NEXT_DATA__
+    const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+    if (nextDataMatch) {
+      try {
+        const nextData = JSON.parse(nextDataMatch[1]);
+        const priceFromNext =
+          nextData?.props?.pageProps?.initialState?.pdp?.product?.price ??
+          nextData?.props?.pageProps?.price ??
+          null;
+        if (priceFromNext) return Number(priceFromNext);
+      } catch { /* continua */ }
+    }
+
     return null;
   } catch {
     return null;
