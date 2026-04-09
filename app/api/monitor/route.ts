@@ -144,29 +144,13 @@ async function updateSheetPrices(
   }
 }
 
-function extractMlbId(url: string): string | null {
-  const match = url.match(/MLB-?(\d+)/i);
-  return match ? `MLB${match[1]}` : null;
-}
-
-async function scrapePrice(url: string): Promise<number | null> {
+async function scrapePrice(url: string): Promise<{ price: number | null; debug: string }> {
   try {
     const parsed = new URL(url);
-    if (!parsed.hostname.endsWith('mercadolivre.com.br')) return null;
-
-    // Estratégia 1: API oficial do ML (não bloqueia IP de data center)
-    const mlbId = extractMlbId(parsed.pathname);
-    if (mlbId) {
-      const apiRes = await fetch(`https://api.mercadolibre.com/items/${mlbId}`, {
-        cache: 'no-store',
-      });
-      if (apiRes.ok) {
-        const data = await apiRes.json() as { price?: number };
-        if (data.price && data.price > 0) return data.price;
-      }
+    if (!parsed.hostname.endsWith('mercadolivre.com.br')) {
+      return { price: null, debug: 'hostname inválido' };
     }
 
-    // Estratégia 2: scraping HTML (fallback)
     const cleanUrl = `${parsed.origin}${parsed.pathname}`;
     const res = await fetch(cleanUrl, {
       headers: {
@@ -177,7 +161,11 @@ async function scrapePrice(url: string): Promise<number | null> {
       redirect: 'follow',
       cache: 'no-store',
     });
-    if (!res.ok) return null;
+
+    if (!res.ok) {
+      return { price: null, debug: `http ${res.status}` };
+    }
+
     const html = await res.text();
 
     const ldBlocks = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g) ?? [];
@@ -187,7 +175,7 @@ async function scrapePrice(url: string): Promise<number | null> {
         const nodes = Array.isArray(json) ? json : [json];
         for (const node of nodes) {
           const price = node?.offers?.price ?? node?.offers?.lowPrice ?? null;
-          if (price) return Number(price);
+          if (price) return { price: Number(price), debug: 'json-ld' };
         }
       } catch { /* continua */ }
     }
@@ -195,13 +183,13 @@ async function scrapePrice(url: string): Promise<number | null> {
     const metaMatch = html.match(/<meta property="product:price:amount" content="([\d.,]+)"/);
     if (metaMatch) {
       const price = Number(metaMatch[1].replace(',', '.'));
-      if (price > 0) return price;
+      if (price > 0) return { price, debug: 'meta-tag' };
     }
 
     const priceMatch = html.match(/"price"\s*:\s*([\d]+(?:\.\d{1,2})?)/);
     if (priceMatch) {
       const price = Number(priceMatch[1]);
-      if (price > 0) return price;
+      if (price > 0) return { price, debug: 'inline-script' };
     }
 
     const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
@@ -212,13 +200,13 @@ async function scrapePrice(url: string): Promise<number | null> {
           nextData?.props?.pageProps?.initialState?.pdp?.product?.price ??
           nextData?.props?.pageProps?.price ??
           null;
-        if (priceFromNext) return Number(priceFromNext);
+        if (priceFromNext) return { price: Number(priceFromNext), debug: 'next-data' };
       } catch { /* continua */ }
     }
 
-    return null;
-  } catch {
-    return null;
+    return { price: null, debug: `html ok mas preço não encontrado (${html.length} bytes)` };
+  } catch (e) {
+    return { price: null, debug: `exceção: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 
@@ -243,11 +231,11 @@ export async function GET(request: NextRequest) {
   let totalAlertas = 0;
 
   for (const row of rows) {
-    const preco = await scrapePrice(row.link_ml_direto!);
+    const { price: preco, debug } = await scrapePrice(row.link_ml_direto!);
     await sleep(1500);
 
     if (preco === null) {
-      results.push({ nome: row.nome, status: 'erro ao buscar preço' });
+      results.push({ nome: row.nome, status: `erro: ${debug}` });
       continue;
     }
 
@@ -255,7 +243,7 @@ export async function GET(request: NextRequest) {
     sheetUpdates.push({
       rowNum: row.rowNum,
       precoNovo: preco,
-      precoAnterior: row.preco_ml, // preco atual vira o anterior
+      precoAnterior: row.preco_ml,
     });
 
     const precoAnterior = row.preco_ml_anterior ?? row.preco_ml;
@@ -277,7 +265,7 @@ export async function GET(request: NextRequest) {
       totalAlertas++;
       results.push({ nome: row.nome, status: 'alerta enviado', preco });
     } else {
-      results.push({ nome: row.nome, status: 'sem queda', preco });
+      results.push({ nome: row.nome, status: `sem queda (${debug})`, preco });
     }
   }
 
