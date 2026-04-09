@@ -1,3 +1,6 @@
+# scripts locais
+scripts/rodar-monitor.bat
+
 # dependencies
 /node_modules
 /.pnp
