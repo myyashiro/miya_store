@@ -20,7 +20,7 @@ if (existsSync(envPath)) {
 }
 
 const require = createRequire(import.meta.url);
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 
 const SHEET_ID = process.env.SHEET_ID ?? process.env.NEXT_PUBLIC_SHEET_ID;
@@ -44,6 +44,9 @@ const LISTAR_GRUPOS = process.argv.includes('--listar-grupos');
 
 // Intervalo entre checagens (em horas)
 const INTERVALO_HORAS = Number(process.env.MONITOR_INTERVALO_HORAS ?? 3);
+
+// Máximo de reenvios (gatilho de 2 dias) por janela de checagem
+const MAX_REENVIOS_POR_JANELA = Number(process.env.MONITOR_MAX_REENVIOS ?? 5);
 
 // --- Planilha ---
 
@@ -502,10 +505,10 @@ async function rodarChecagem(whatsappClient) {
   const colMap = { precoMlCol, precoMlAntCol, precoAmazonCol, precoAmazonAntCol, precoShopeeCol, precoShopeeAntCol };
   const sheetUpdates = [];
   const rowNumsAlertados = [];
+  let reenviosNaJanela = 0;
 
   const horaAtual = new Date().getHours();
   const dentroDoHorario = horaAtual >= 9 && horaAtual <= 21;
-  const { MessageMedia } = require('whatsapp-web.js');
 
   const enviarAlerta = async (alerta) => {
     if (!dentroDoHorario) {
@@ -623,29 +626,36 @@ async function rodarChecagem(whatsappClient) {
       if (quedaShopee) console.log(`🔥 ${row.nome} — Shopee: R$ ${row.preco_shopee} → R$ ${shopeePrice} (-${calcDesconto(row.preco_shopee, shopeePrice)}%)`);
       await enviarAlerta({ ...alertaBase, tipo: 'queda' });
     } else if (alertaMaisDeNDias(row.alerta_enviado_em, 2)) {
-      console.log(`🔁 ${row.nome} — reenvio (último alerta há mais de 2 dias)`);
-      await enviarAlerta({ ...alertaBase, tipo: 'reenvio' });
+      if (reenviosNaJanela >= MAX_REENVIOS_POR_JANELA) {
+        console.log(`⏭️  ${row.nome} — reenvio pulado (limite de ${MAX_REENVIOS_POR_JANELA} reenvios por janela atingido)`);
+      } else {
+        console.log(`🔁 ${row.nome} — reenvio (último alerta há mais de 2 dias)`);
+        await enviarAlerta({ ...alertaBase, tipo: 'reenvio' });
+        reenviosNaJanela++;
+      }
     } else {
       console.log(`✅ ${row.nome} — R$ ${mlPrice ?? '?'} (sem queda)`);
     }
   }
 
-  if (sheetUpdates.length > 0) {
-    console.log(`\nAtualizando ${sheetUpdates.length} entradas na planilha...`);
+  if (sheetUpdates.length > 0 || (rowNumsAlertados.length > 0 && alertaEnviadoEmCol)) {
     const accessToken = await getGoogleAccessToken();
-    await updateSheetPrices(accessToken, sheetUpdates, colMap);
-    console.log('Planilha atualizada.');
 
-    const revalidateSecret = process.env.REVALIDATE_SECRET ?? 'miya2025';
-    const rv = await fetch(`https://miya-store.vercel.app/api/revalidate?secret=${revalidateSecret}`);
-    if (rv.ok) console.log('Site revalidado.');
-    else console.log(`Revalidate falhou: ${rv.status}`);
-  }
+    if (sheetUpdates.length > 0) {
+      console.log(`\nAtualizando ${sheetUpdates.length} entradas na planilha...`);
+      await updateSheetPrices(accessToken, sheetUpdates, colMap);
+      console.log('Planilha atualizada.');
 
-  if (rowNumsAlertados.length > 0 && alertaEnviadoEmCol) {
-    const accessToken = await getGoogleAccessToken();
-    await updateAlertaEnviadoEm(accessToken, rowNumsAlertados, alertaEnviadoEmCol);
-    console.log(`alerta_enviado_em atualizado para ${rowNumsAlertados.length} produto(s).`);
+      const revalidateSecret = process.env.REVALIDATE_SECRET ?? 'miya2025';
+      const rv = await fetch(`https://miya-store.vercel.app/api/revalidate?secret=${revalidateSecret}`);
+      if (rv.ok) console.log('Site revalidado.');
+      else console.log(`Revalidate falhou: ${rv.status}`);
+    }
+
+    if (rowNumsAlertados.length > 0 && alertaEnviadoEmCol) {
+      await updateAlertaEnviadoEm(accessToken, rowNumsAlertados, alertaEnviadoEmCol);
+      console.log(`alerta_enviado_em atualizado para ${rowNumsAlertados.length} produto(s).`);
+    }
   }
 
   console.log(`\nPróxima checagem em ${INTERVALO_HORAS}h.`);
