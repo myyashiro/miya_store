@@ -18,7 +18,7 @@ export default function PriceComparison({ product }: { product: Product }) {
   if (platforms.length === 0) return null;
 
   return (
-    <div style={{ borderRadius: 16, overflow: 'hidden', border: '1px solid var(--border)' }}>
+    <div style={{ borderRadius: 16, overflow: 'hidden', border: '1px solid var(--border)', width: 'fit-content' }}>
       <div style={{ padding: '12px 18px', backgroundColor: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
         <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
           Comparar preços
@@ -30,31 +30,25 @@ export default function PriceComparison({ product }: { product: Product }) {
           <div
             key={p.name}
             style={{
-              display: 'flex',
+              display: 'grid',
+              gridTemplateColumns: 'auto 140px 110px auto',
               alignItems: 'center',
-              padding: '16px 18px',
+              padding: '14px 18px',
               borderBottom: i < platforms.length - 1 ? '1px solid var(--border)' : 'none',
               backgroundColor: 'var(--bg)',
               gap: 12,
             }}
           >
             {/* Barra lateral */}
-            <div style={{ width: 3, height: 32, borderRadius: 2, backgroundColor: 'var(--border-strong)', flexShrink: 0 }} />
+            <div style={{ width: 3, height: 28, borderRadius: 2, backgroundColor: 'var(--border-strong)' }} />
 
             {/* Nome */}
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: 110 }}>{p.name}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{p.name}</span>
 
             {/* Preço */}
-            {p.price != null && (
-              <span style={{
-                fontSize: 18,
-                fontWeight: 700,
-                letterSpacing: '-0.02em',
-                color: 'var(--text)',
-              }}>
-                {formatPrice(p.price)}
-              </span>
-            )}
+            <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text)' }}>
+              {p.price != null ? formatPrice(p.price) : ''}
+            </span>
 
             {/* CTA */}
             {p.link ? (
@@ -70,8 +64,8 @@ export default function PriceComparison({ product }: { product: Product }) {
                   fontWeight: 500,
                   color: '#fff',
                   whiteSpace: 'nowrap',
-                  flexShrink: 0,
                   transition: 'opacity 0.15s',
+                  textAlign: 'center',
                 }}
                 onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.85')}
                 onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}

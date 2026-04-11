@@ -122,10 +122,8 @@ export default async function ProdutoPage({ params }: { params: Promise<{ slug: 
               </div>
             )}
 
-            {/* Comparação — largura limitada */}
-            <div style={{ maxWidth: 560 }}>
-              <PriceComparison product={product} />
-            </div>
+            {/* Comparação */}
+            <PriceComparison product={product} />
           </div>
         </div>
       </div>
