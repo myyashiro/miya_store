@@ -21,7 +21,7 @@ export default function SubcategoryFilter({
     <>
       {/* Filtros */}
       {subcategories.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '0 48px', marginBottom: 24 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '0 48px', marginBottom: 16 }}>
           <button
             onClick={() => setSelected(null)}
             style={{

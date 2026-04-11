@@ -38,11 +38,11 @@ export default async function CategoriaPage({ params }: { params: Promise<{ cate
   return (
     <div style={{ backgroundColor: '#F8F9FA', minHeight: '100vh' }}>
       {/* Header */}
-      <div style={{ padding: '48px 48px 32px' }}>
-        <h1 style={{ fontSize: 'clamp(32px, 4vw, 48px)', fontWeight: 700, letterSpacing: '-0.03em', color: 'var(--text)', marginBottom: 6 }}>
+      <div style={{ padding: '20px 48px 12px' }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text)', marginBottom: 4 }}>
           {matchedCat}
         </h1>
-        <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
           {products.length} {products.length === 1 ? 'produto encontrado' : 'produtos encontrados'}
         </p>
       </div>
