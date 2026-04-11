@@ -106,7 +106,7 @@ export default function ProductCard({ product }: { product: Product }) {
           <p style={{ fontSize: 14, color: '#696E71' }}>Ver preço</p>
         )}
 
-        <div style={{ marginTop: 'auto', paddingTop: 8, display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ marginTop: 'auto', paddingTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
           <span className="gradient-bg" style={{
             display: 'inline-block',
             padding: '8px 18px',
@@ -116,9 +116,6 @@ export default function ProductCard({ product }: { product: Product }) {
             color: '#fff',
           }}>
             Comprar
-          </span>
-          <span className="gradient-text" style={{ fontSize: 13, fontWeight: 500 }}>
-            Ver detalhes →
           </span>
         </div>
       </div>

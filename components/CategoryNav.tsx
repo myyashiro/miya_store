@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { slugify } from '@/lib/utils';
 
 export default function CategoryNav({ categories }: { categories: string[] }) {
   const pathname = usePathname();
@@ -10,7 +11,7 @@ export default function CategoryNav({ categories }: { categories: string[] }) {
   return (
     <nav style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
       {categories.map((cat) => {
-        const slug = cat.toLowerCase();
+        const slug = slugify(cat);
         const isActive = pathname === `/${slug}`;
         return (
           <Link

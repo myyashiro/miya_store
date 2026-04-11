@@ -2,17 +2,20 @@ import { getCategories, getProductsByCategory } from '@/lib/sheets';
 import SubcategoryFilter from '@/components/SubcategoryFilter';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
+import { slugify } from '@/lib/utils';
 
 export const revalidate = 3600;
 
 export async function generateStaticParams() {
   const categories = await getCategories();
-  return categories.map((cat) => ({ categoria: cat.toLowerCase() }));
+  return categories.map((cat) => ({ categoria: slugify(cat) }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ categoria: string }> }): Promise<Metadata> {
   const { categoria } = await params;
-  const name = categoria.charAt(0).toUpperCase() + categoria.slice(1);
+  const categories = await getCategories();
+  const matchedCat = categories.find((c) => slugify(c) === categoria) ?? categoria;
+  const name = typeof matchedCat === 'string' ? matchedCat : categoria;
   return {
     title: `${name} — Miya`,
     description: `Melhores ofertas de ${name} comparadas entre Amazon, Mercado Livre e Shopee.`,
@@ -22,7 +25,7 @@ export async function generateMetadata({ params }: { params: Promise<{ categoria
 export default async function CategoriaPage({ params }: { params: Promise<{ categoria: string }> }) {
   const { categoria } = await params;
   const categories = await getCategories();
-  const matchedCat = categories.find((c) => c.toLowerCase() === categoria.toLowerCase());
+  const matchedCat = categories.find((c) => slugify(c) === categoria);
 
   if (!matchedCat) notFound();
 

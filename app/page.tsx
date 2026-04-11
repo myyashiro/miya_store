@@ -8,12 +8,11 @@ export const revalidate = 3600;
 export default async function Home() {
   const [products, categories] = await Promise.all([getProducts(), getCategories()]);
 
-  const featured = products.filter((p) => p.destaque);
   const byCategory = categories.map((cat) => ({
     name: cat,
     slug: cat.toLowerCase(),
-    products: products.filter((p) => p.categoria === cat),
-  }));
+    products: products.filter((p) => p.categoria === cat && p.destaque),
+  })).filter(({ products: catProducts }) => catProducts.length > 0);
 
   const titleRow: React.CSSProperties = { padding: '0 48px', marginBottom: 20, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' };
 
@@ -33,21 +32,8 @@ export default async function Home() {
 
       <div style={{ padding: '56px 0 80px', backgroundColor: '#F8F9FA' }}>
 
-        {/* Destaques */}
-        {featured.length > 0 && (
-          <section style={{ marginBottom: 64 }}>
-            <div style={titleRow}>
-              <h2 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text)' }}>Destaques</h2>
-            </div>
-            <div className="shelf-scroll">
-              {featured.map((p) => <ProductCard key={p.slug} product={p} />)}
-            </div>
-          </section>
-        )}
-
-        {/* Por categoria */}
+        {/* Por categoria — apenas destaques */}
         {byCategory.map(({ name, slug, products: catProducts }) => {
-          if (catProducts.length === 0) return null;
           return (
             <section key={name} style={{ marginBottom: 64 }}>
               <div style={titleRow}>
@@ -63,7 +49,7 @@ export default async function Home() {
           );
         })}
 
-        {products.length === 0 && (
+        {byCategory.length === 0 && (
           <div style={{ padding: '80px 48px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <p style={{ fontSize: 24, fontWeight: 700, marginBottom: 8, color: 'var(--text)' }}>Nenhum produto ainda</p>
             <p style={{ fontSize: 14 }}>Adicione produtos na planilha para começar.</p>
