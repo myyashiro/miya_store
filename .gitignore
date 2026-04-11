@@ -1,6 +1,14 @@
 # scripts locais
 scripts/rodar-monitor.bat
 
+# whatsapp-web.js (sessão local, não deve ir ao repositório)
+.wwebjs_auth/
+.wwebjs_cache/
+qrcode.png
+
+# claude code
+.claude/
+
 # dependencies
 /node_modules
 /.pnp
