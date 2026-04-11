@@ -26,11 +26,19 @@ const QRCode = require('qrcode');
 const SHEET_ID = process.env.SHEET_ID ?? process.env.NEXT_PUBLIC_SHEET_ID;
 const SHEET_NAME = 'PRODUTOS';
 
-// Destino dos alertas: grupo tem prioridade sobre número individual
-// WHATSAPP_GRUPO_ID ex: 120363XXXXXXXXXX@g.us (rode com --listar-grupos para descobrir)
-// WHATSAPP_DESTINO ex: 5511999999999 (número individual, fallback)
+// Mapeamento nome da coluna miya_group → ID do grupo WhatsApp
+// Configurar no .env.local: WHATSAPP_GRUPO_MIYA_STORE, WHATSAPP_GRUPO_MIYA_BEAUTY, etc.
+const GRUPO_MAP = {
+  'miya store':       process.env.WHATSAPP_GRUPO_MIYA_STORE,
+  'miya beauty':      process.env.WHATSAPP_GRUPO_MIYA_BEAUTY,
+  'miya fitness':     process.env.WHATSAPP_GRUPO_MIYA_FITNESS,
+  'miya collectibles': process.env.WHATSAPP_GRUPO_MIYA_COLLECTIBLES,
+};
+
+// Fallback legado: WHATSAPP_GRUPO_ID ou número individual
 const WHATSAPP_GRUPO_ID = process.env.WHATSAPP_GRUPO_ID;
 const WHATSAPP_DESTINO = process.env.WHATSAPP_DESTINO;
+const CHAT_ID_FALLBACK = WHATSAPP_GRUPO_ID ?? (WHATSAPP_DESTINO ? `${WHATSAPP_DESTINO}@c.us` : null);
 
 const LISTAR_GRUPOS = process.argv.includes('--listar-grupos');
 
@@ -99,6 +107,7 @@ async function getSheetRows() {
       preco_shopee_anterior: get('preco_shopee_anterior') != null ? Number(get('preco_shopee_anterior')) : undefined,
       link_shopee:           get('link_shopee')           ? String(get('link_shopee'))  : undefined,
       alerta_enviado_em:     get('alerta_enviado_em')     ? String(get('alerta_enviado_em')) : undefined,
+      miya_group:            get('miya_group')            ? String(get('miya_group')).toLowerCase().trim() : undefined,
     });
   });
 
@@ -492,7 +501,44 @@ async function rodarChecagem(whatsappClient) {
 
   const colMap = { precoMlCol, precoMlAntCol, precoAmazonCol, precoAmazonAntCol, precoShopeeCol, precoShopeeAntCol };
   const sheetUpdates = [];
-  const alertas = [];
+  const rowNumsAlertados = [];
+
+  const horaAtual = new Date().getHours();
+  const dentroDoHorario = horaAtual >= 9 && horaAtual <= 21;
+  const { MessageMedia } = require('whatsapp-web.js');
+
+  const enviarAlerta = async (alerta) => {
+    if (!dentroDoHorario) {
+      console.log(`🕐 Fora do horário (${horaAtual}h) — alerta de ${alerta.nome} ignorado.`);
+      return;
+    }
+    if (!whatsappClient) return;
+
+    const chatId = GRUPO_MAP[alerta.miya_group] ?? CHAT_ID_FALLBACK;
+    if (!chatId) {
+      console.warn(`⚠️  ${alerta.nome} — grupo "${alerta.miya_group}" sem ID configurado, alerta ignorado.`);
+      return;
+    }
+
+    const msg = buildMsg(alerta);
+    let enviado = false;
+    for (let tentativa = 1; tentativa <= 3 && !enviado; tentativa++) {
+      try {
+        if (alerta.imagem) {
+          const media = await MessageMedia.fromUrl(alerta.imagem, { unsafeMime: true });
+          await whatsappClient.sendMessage(chatId, media, { caption: msg });
+        } else {
+          await whatsappClient.sendMessage(chatId, msg);
+        }
+        console.log(`📲 Alerta enviado: ${alerta.nome} → ${alerta.miya_group ?? 'grupo padrão'}`);
+        rowNumsAlertados.push(alerta.rowNum);
+        enviado = true;
+      } catch (e) {
+        console.error(`Erro ao enviar WhatsApp (tentativa ${tentativa}/3): ${e.message}`);
+        if (tentativa < 3) await sleep(5000);
+      }
+    }
+  };
 
   for (const row of rows) {
     // --- Scraping ---
@@ -534,15 +580,16 @@ async function rodarChecagem(whatsappClient) {
     const calcDesconto = (ant, novo) => Math.round(((ant - novo) / ant) * 100);
 
     const alertaBase = {
-      rowNum: row.rowNum,
-      nome:   row.nome,
-      imagem: row.imagem,
+      rowNum:     row.rowNum,
+      nome:       row.nome,
+      imagem:     row.imagem,
+      miya_group: row.miya_group,
       ml: mlPrice !== null ? {
-        precoNovo:    mlPrice,
+        precoNovo:     mlPrice,
         precoAnterior: row.preco_ml,
-        desconto:     quedaMl ? calcDesconto(row.preco_ml, mlPrice) : null,
-        url:          row.link_ml ?? row.link_ml_direto,
-        dropped:      quedaMl,
+        desconto:      quedaMl ? calcDesconto(row.preco_ml, mlPrice) : null,
+        url:           row.link_ml ?? row.link_ml_direto,
+        dropped:       quedaMl,
       } : null,
       amazon: (amazonPrice !== null || row.preco_amazon) ? {
         precoNovo:     amazonPrice ?? row.preco_amazon,
@@ -566,18 +613,18 @@ async function rodarChecagem(whatsappClient) {
       } : null,
     };
 
-    // --- Gatilhos ---
+    // --- Gatilho + envio imediato ---
     if (!row.alerta_enviado_em) {
       console.log(`🆕 ${row.nome} — novo produto`);
-      alertas.push({ ...alertaBase, tipo: 'novo' });
+      await enviarAlerta({ ...alertaBase, tipo: 'novo' });
     } else if (temQueda) {
       if (quedaMl)     console.log(`🔥 ${row.nome} — ML: R$ ${row.preco_ml} → R$ ${mlPrice} (-${calcDesconto(row.preco_ml, mlPrice)}%)`);
       if (quedaAmazon) console.log(`🔥 ${row.nome} — Amazon: R$ ${row.preco_amazon} → R$ ${amazonPrice} (-${calcDesconto(row.preco_amazon, amazonPrice)}%)`);
       if (quedaShopee) console.log(`🔥 ${row.nome} — Shopee: R$ ${row.preco_shopee} → R$ ${shopeePrice} (-${calcDesconto(row.preco_shopee, shopeePrice)}%)`);
-      alertas.push({ ...alertaBase, tipo: 'queda' });
+      await enviarAlerta({ ...alertaBase, tipo: 'queda' });
     } else if (alertaMaisDeNDias(row.alerta_enviado_em, 2)) {
       console.log(`🔁 ${row.nome} — reenvio (último alerta há mais de 2 dias)`);
-      alertas.push({ ...alertaBase, tipo: 'reenvio' });
+      await enviarAlerta({ ...alertaBase, tipo: 'reenvio' });
     } else {
       console.log(`✅ ${row.nome} — R$ ${mlPrice ?? '?'} (sem queda)`);
     }
@@ -595,47 +642,10 @@ async function rodarChecagem(whatsappClient) {
     else console.log(`Revalidate falhou: ${rv.status}`);
   }
 
-  const chatId = WHATSAPP_GRUPO_ID ?? (WHATSAPP_DESTINO ? `${WHATSAPP_DESTINO}@c.us` : null);
-
-  const horaAtual = new Date().getHours();
-  const dentroDoHorario = horaAtual >= 9 && horaAtual <= 21;
-
-  if (!dentroDoHorario && alertas.length > 0) {
-    console.log(`🕐 Fora do horário permitido (${horaAtual}h) — alertas não enviados (permitido: 9h–21h).`);
-  }
-
-  if (alertas.length > 0 && dentroDoHorario && whatsappClient && chatId) {
-    const { MessageMedia } = require('whatsapp-web.js');
-    const rowNumsAlertados = [];
-
-    for (const a of alertas) {
-      const msg = buildMsg(a);
-      let enviado = false;
-      for (let tentativa = 1; tentativa <= 3 && !enviado; tentativa++) {
-        try {
-          if (a.imagem) {
-            const media = await MessageMedia.fromUrl(a.imagem, { unsafeMime: true });
-            await whatsappClient.sendMessage(chatId, media, { caption: msg });
-          } else {
-            await whatsappClient.sendMessage(chatId, msg);
-          }
-          console.log(`📲 Alerta enviado: ${a.nome}`);
-          rowNumsAlertados.push(a.rowNum);
-          enviado = true;
-        } catch (e) {
-          console.error(`Erro ao enviar WhatsApp (tentativa ${tentativa}/3): ${e.message}`);
-          if (tentativa < 3) await sleep(5000);
-        }
-      }
-    }
-
-    if (rowNumsAlertados.length > 0 && alertaEnviadoEmCol) {
-      const accessToken = await getGoogleAccessToken();
-      await updateAlertaEnviadoEm(accessToken, rowNumsAlertados, alertaEnviadoEmCol);
-      console.log(`alerta_enviado_em atualizado para ${rowNumsAlertados.length} produto(s).`);
-    }
-  } else if (alertas.length > 0 && !chatId) {
-    console.warn('⚠️  Nenhum destino configurado — alertas não enviados.');
+  if (rowNumsAlertados.length > 0 && alertaEnviadoEmCol) {
+    const accessToken = await getGoogleAccessToken();
+    await updateAlertaEnviadoEm(accessToken, rowNumsAlertados, alertaEnviadoEmCol);
+    console.log(`alerta_enviado_em atualizado para ${rowNumsAlertados.length} produto(s).`);
   }
 
   console.log(`\nPróxima checagem em ${INTERVALO_HORAS}h.`);
