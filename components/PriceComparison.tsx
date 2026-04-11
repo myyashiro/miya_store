@@ -17,9 +17,6 @@ export default function PriceComparison({ product }: { product: Product }) {
 
   if (platforms.length === 0) return null;
 
-  const prices = platforms.filter((p) => p.price != null).map((p) => p.price!);
-  const minPrice = prices.length > 0 ? Math.min(...prices) : null;
-
   return (
     <div style={{ borderRadius: 16, overflow: 'hidden', border: '1px solid var(--border)' }}>
       <div style={{ padding: '12px 18px', backgroundColor: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
@@ -29,7 +26,6 @@ export default function PriceComparison({ product }: { product: Product }) {
       </div>
 
       {platforms.map((p, i) => {
-        const isBest = p.price != null && p.price === minPrice;
         return (
           <div
             key={p.name}
@@ -46,24 +42,7 @@ export default function PriceComparison({ product }: { product: Product }) {
             <div style={{ width: 3, height: 32, borderRadius: 2, backgroundColor: 'var(--border-strong)', flexShrink: 0 }} />
 
             {/* Nome */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{p.name}</span>
-              {isBest && (
-                <span style={{
-                  alignSelf: 'flex-start',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  color: '#fff',
-                  background: 'linear-gradient(90deg, #004aad, #cb6ce6)',
-                  padding: '4px 10px',
-                  borderRadius: 4,
-                }}>
-                  Menor preço
-                </span>
-              )}
-            </div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: 110 }}>{p.name}</span>
 
             {/* Preço */}
             {p.price != null && (

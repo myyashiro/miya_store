@@ -55,7 +55,7 @@ export default async function ProdutoPage({ params }: { params: Promise<{ slug: 
       </div>
 
       {/* Produto */}
-      <div className="produto-padding" style={{ padding: '32px 48px 0' }}>
+      <div className="produto-padding" style={{ padding: '12px 48px 0' }}>
         <div className="produto-grid" style={{
           display: 'grid',
           gridTemplateColumns: '480px minmax(0, 1fr)',
@@ -102,7 +102,7 @@ export default async function ProdutoPage({ params }: { params: Promise<{ slug: 
                   {product.marca}
                 </p>
               )}
-              <h1 style={{ fontSize: 'clamp(22px, 2.5vw, 32px)', fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.15, color: 'var(--text)' }}>
+              <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.25, color: 'var(--text)' }}>
                 {product.nome}
               </h1>
               {product.descricao && (
