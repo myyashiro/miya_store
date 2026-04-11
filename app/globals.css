@@ -139,7 +139,6 @@ a { color: inherit; text-decoration: none; }
 
   /* Produto page */
   .produto-grid { grid-template-columns: 1fr !important; }
-  .produto-grid > *:first-child { max-width: 260px !important; margin: 0 auto; }
   .produto-padding { padding: 24px 20px 0 !important; }
   .breadcrumb-padding { padding: 12px 20px !important; }
   .related-title-padding { padding: 0 20px !important; }
@@ -147,5 +146,11 @@ a { color: inherit; text-decoration: none; }
 
   /* PriceComparison */
   .price-comparison-wrap { width: 100% !important; }
+
+  /* Botão Comprar — oculto no grid de categoria */
+  .product-grid .comprar-btn { display: none !important; }
+
+  /* Imagem do produto — um pouco maior */
+  .produto-grid > *:first-child { max-width: 320px !important; margin: 0 auto; }
 }
 

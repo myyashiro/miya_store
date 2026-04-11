@@ -107,7 +107,7 @@ export default function ProductCard({ product }: { product: Product }) {
             <p style={{ fontSize: 14, color: '#696E71' }}>Ver preço</p>
           )}
 
-          <span className="gradient-bg" style={{
+          <span className="comprar-btn gradient-bg" style={{
             flexShrink: 0,
             display: 'inline-block',
             padding: '8px 18px',
