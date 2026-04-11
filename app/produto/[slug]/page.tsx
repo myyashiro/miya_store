@@ -130,7 +130,7 @@ export default async function ProdutoPage({ params }: { params: Promise<{ slug: 
 
       {/* Relacionados */}
       {related.length > 0 && (
-        <section style={{ marginTop: 64, paddingBottom: 80 }}>
+        <section className="related-section" style={{ marginTop: 64, paddingBottom: 80 }}>
           <div className="related-title-padding" style={{ padding: '0 48px', marginBottom: 20, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
             <h2 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text)' }}>
               Mais em {product.categoria}

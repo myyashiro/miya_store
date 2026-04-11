@@ -93,34 +93,59 @@ a { color: inherit; text-decoration: none; }
 .shelf-scroll > *:first-child { margin-left: 48px; }
 .shelf-scroll > *:last-child  { margin-right: 48px; }
 
-/* Produto page — mobile */
-@media (max-width: 639px) {
-  .produto-grid {
-    grid-template-columns: 1fr !important;
-  }
-  .produto-grid > *:first-child {
-    max-width: 260px !important;
-    margin: 0 auto;
-  }
-  .produto-padding {
-    padding: 24px 20px 0 !important;
-  }
-  .breadcrumb-padding {
-    padding: 12px 20px !important;
-  }
-  .related-title-padding {
-    padding: 0 20px !important;
-  }
-}
+/* Padding horizontal responsivo */
+.page-px { padding-left: 48px; padding-right: 48px; }
 
+/* Linha de título de seção */
+.section-title-row { padding: 0 48px; }
+
+/* Grid de produtos (categoria) */
 .product-grid {
   display: grid;
-  gap: 12px;
+  gap: 16px;
   grid-template-columns: repeat(2, 1fr);
 }
 @media (min-width: 640px) {
   .product-grid {
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   }
+}
+
+/* PriceComparison — linha */
+.price-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Mobile */
+@media (max-width: 639px) {
+  /* Padding horizontal */
+  .page-px { padding-left: 20px !important; padding-right: 20px !important; }
+  .section-title-row { padding: 0 20px !important; }
+
+  /* Shelf scroll */
+  .shelf-scroll { scroll-padding-left: 20px; }
+  .shelf-scroll > *:first-child { margin-left: 20px; }
+  .shelf-scroll > *:last-child  { margin-right: 20px; }
+
+  /* Header logo */
+  .header-logo { height: 40px !important; }
+
+  /* Hero */
+  .hero-inner { padding: 40px 24px 36px !important; }
+  .hero-inner p { max-width: 100% !important; font-size: 15px !important; }
+
+  /* Produto page */
+  .produto-grid { grid-template-columns: 1fr !important; }
+  .produto-grid > *:first-child { max-width: 260px !important; margin: 0 auto; }
+  .produto-padding { padding: 24px 20px 0 !important; }
+  .breadcrumb-padding { padding: 12px 20px !important; }
+  .related-title-padding { padding: 0 20px !important; }
+  .related-section { margin-top: 40px !important; }
+
+  /* PriceComparison */
+  .price-comparison-wrap { width: 100% !important; }
 }
 

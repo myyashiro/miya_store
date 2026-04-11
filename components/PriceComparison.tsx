@@ -18,7 +18,7 @@ export default function PriceComparison({ product }: { product: Product }) {
   if (platforms.length === 0) return null;
 
   return (
-    <div style={{ borderRadius: 16, overflow: 'hidden', border: '1px solid var(--border)', width: 'fit-content' }}>
+    <div className="price-comparison-wrap" style={{ borderRadius: 16, overflow: 'hidden', border: '1px solid var(--border)' }}>
       <div style={{ padding: '12px 18px', backgroundColor: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
         <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
           Comparar preços
@@ -29,14 +29,11 @@ export default function PriceComparison({ product }: { product: Product }) {
         return (
           <div
             key={p.name}
+            className="price-row"
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'auto 140px 110px auto',
-              alignItems: 'center',
               padding: '14px 18px',
               borderBottom: i < platforms.length - 1 ? '1px solid var(--border)' : 'none',
               backgroundColor: 'var(--bg)',
-              gap: 12,
             }}
           >
             {/* Barra lateral */}

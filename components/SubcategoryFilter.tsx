@@ -21,7 +21,7 @@ export default function SubcategoryFilter({
     <>
       {/* Filtros */}
       {subcategories.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '0 48px', marginBottom: 16 }}>
+        <div className="page-px" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
           <button
             onClick={() => setSelected(null)}
             style={{
@@ -63,12 +63,7 @@ export default function SubcategoryFilter({
       )}
 
       {/* Produtos — grid com quebra de linha */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-        gap: 16,
-        padding: '0 48px',
-      }}>
+      <div className="product-grid page-px">
         {filtered.map((p) => (
           <ProductCard key={p.slug} product={p} />
         ))}

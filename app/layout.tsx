@@ -23,16 +23,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           top: 0,
           zIndex: 50,
         }}>
-          <div style={{
-            padding: '0 48px',
+          <div className="page-px" style={{
             height: 52,
             display: 'flex',
             alignItems: 'center',
-            gap: 20,
+            gap: 16,
           }}>
             <a href="/" style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/miyastore_logo.png" alt="Miya Store" style={{ height: 52, width: 'auto' }} />
+              <img src="/miyastore_logo.png" alt="Miya Store" className="header-logo" style={{ height: 52, width: 'auto' }} />
             </a>
             <CategoryNav categories={categories} />
           </div>
@@ -43,9 +42,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <footer style={{
           backgroundColor: 'var(--surface)',
           borderTop: '1px solid var(--border)',
-          padding: '32px 24px',
+          paddingTop: 32,
+          paddingBottom: 32,
         }}>
-          <div style={{ padding: '0 48px' }}>
+          <div className="page-px">
             <p style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 8 }}>
               © {new Date().getFullYear()} Miya
             </p>

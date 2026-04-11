@@ -9,7 +9,7 @@ export default function CategoryNav({ categories }: { categories: string[] }) {
   if (categories.length === 0) return null;
 
   return (
-    <nav style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+    <nav style={{ display: 'flex', alignItems: 'center', overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' } as React.CSSProperties}>
       {categories.map((cat) => {
         const slug = slugify(cat);
         const isActive = pathname === `/${slug}`;

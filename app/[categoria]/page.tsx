@@ -38,7 +38,7 @@ export default async function CategoriaPage({ params }: { params: Promise<{ cate
   return (
     <div style={{ backgroundColor: '#F8F9FA', minHeight: '100vh' }}>
       {/* Header */}
-      <div style={{ padding: '20px 48px 12px' }}>
+      <div className="page-px" style={{ paddingTop: 20, paddingBottom: 12 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text)', marginBottom: 4 }}>
           {matchedCat}
         </h1>
@@ -52,7 +52,7 @@ export default async function CategoriaPage({ params }: { params: Promise<{ cate
         {products.length > 0 ? (
           <SubcategoryFilter products={products} subcategories={subcategories} />
         ) : (
-          <div style={{ textAlign: 'center', padding: '80px 48px', color: 'var(--text-muted)' }}>
+          <div className="page-px" style={{ textAlign: 'center', paddingTop: 80, paddingBottom: 80, color: 'var(--text-muted)' }}>
             <p style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, color: 'var(--text)' }}>Nenhum produto nesta categoria</p>
             <p style={{ fontSize: 14 }}>Em breve novidades por aqui.</p>
           </div>
