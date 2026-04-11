@@ -92,22 +92,23 @@ export default function ProductCard({ product }: { product: Product }) {
           {product.nome}
         </p>
 
-        {minPrice != null ? (
-          <div>
-            <p style={{ fontSize: 11, color: '#696E71', marginBottom: 2 }}>A partir de</p>
-            <p style={{ fontSize: 19, fontWeight: 700, color: '#1d1d1f', letterSpacing: '-0.02em' }}>
-              {formatPrice(minPrice)}
-            </p>
-            {platLabel && (
-              <p style={{ fontSize: 11, color: '#696E71', marginTop: 2 }}>em {platLabel}</p>
-            )}
-          </div>
-        ) : (
-          <p style={{ fontSize: 14, color: '#696E71' }}>Ver preço</p>
-        )}
+        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
+          {minPrice != null ? (
+            <div>
+              <p style={{ fontSize: 11, color: '#696E71', marginBottom: 2 }}>A partir de</p>
+              <p style={{ fontSize: 19, fontWeight: 700, color: '#1d1d1f', letterSpacing: '-0.02em' }}>
+                {formatPrice(minPrice)}
+              </p>
+              {platLabel && (
+                <p style={{ fontSize: 11, color: '#696E71', marginTop: 2 }}>em {platLabel}</p>
+              )}
+            </div>
+          ) : (
+            <p style={{ fontSize: 14, color: '#696E71' }}>Ver preço</p>
+          )}
 
-        <div style={{ marginTop: 'auto', paddingTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
           <span className="gradient-bg" style={{
+            flexShrink: 0,
             display: 'inline-block',
             padding: '8px 18px',
             borderRadius: 980,

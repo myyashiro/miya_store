@@ -62,8 +62,13 @@ export default function SubcategoryFilter({
         </div>
       )}
 
-      {/* Produtos — mesmo padrão da homepage */}
-      <div className="shelf-scroll">
+      {/* Produtos — grid com quebra de linha */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+        gap: 16,
+        padding: '0 48px',
+      }}>
         {filtered.map((p) => (
           <ProductCard key={p.slug} product={p} />
         ))}
