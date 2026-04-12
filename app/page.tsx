@@ -20,10 +20,10 @@ export default async function Home() {
       <AuroraBackground className="min-h-[300px] items-center justify-center" showRadialGradient>
         <div className="hero-inner" style={{ padding: '64px 48px 56px', width: '100%', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <h1 style={{ fontSize: 'clamp(28px, 5vw, 58px)', fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1.1, color: 'var(--text)', fontFamily: "'Red Hat Display', sans-serif" }}>
-            Economize tempo.<br />Economize dinheiro.
+            Economize tempo e dinheiro
           </h1>
           <p style={{ marginTop: 16, fontSize: 17, color: 'var(--text-muted)', lineHeight: 1.6, maxWidth: 520 }}>
-            Pesquisamos, comparamos e selecionamos os melhores produtos da Amazon, Mercado Livre e Shopee, para que você só precise escolher onde comprar.
+            Monitoramos os preços para que você só precise escolher onde comprar.
           </p>
         </div>
       </AuroraBackground>
