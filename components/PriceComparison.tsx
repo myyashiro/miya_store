@@ -18,7 +18,7 @@ export default function PriceComparison({ product }: { product: Product }) {
   if (platforms.length === 0) return null;
 
   return (
-    <div className="price-comparison-wrap" style={{ borderRadius: 16, overflow: 'hidden', border: '1px solid var(--border)' }}>
+    <div className="price-comparison-wrap" style={{ borderRadius: 16, overflow: 'hidden', border: '1px solid var(--border)', width: 'fit-content' }}>
       <div style={{ padding: '12px 18px', backgroundColor: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
         <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
           Comparar preços

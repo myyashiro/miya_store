@@ -88,7 +88,7 @@ export default function ProductCard({ product }: { product: Product }) {
           </p>
         )}
 
-        <p style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.3, color: '#1d1d1f', letterSpacing: '-0.01em' }}>
+        <p style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.3, color: '#1d1d1f', letterSpacing: '-0.01em', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
           {product.nome}
         </p>
 

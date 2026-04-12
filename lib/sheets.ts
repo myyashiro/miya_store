@@ -78,9 +78,26 @@ export async function getProducts(): Promise<Product[]> {
   }
 }
 
+const CATEGORY_ORDER = [
+  'Mercado',
+  'Suplementos',
+  'Skincare',
+  'Haircare',
+  'Bodycare',
+  'Colecionáveis',
+];
+
 export async function getCategories(): Promise<string[]> {
   const products = await getProducts();
-  return [...new Set(products.map((p) => p.categoria).filter(Boolean))];
+  const unique = [...new Set(products.map((p) => p.categoria).filter(Boolean))];
+  return unique.sort((a, b) => {
+    const ia = CATEGORY_ORDER.indexOf(a);
+    const ib = CATEGORY_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
 }
 
 export async function getProductBySlug(slug: string): Promise<Product | undefined> {

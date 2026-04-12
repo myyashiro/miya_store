@@ -127,6 +127,7 @@ a { color: inherit; text-decoration: none; }
 
   /* Shelf scroll */
   .shelf-scroll { scroll-padding-left: 20px; }
+  .shelf-scroll > * { width: min(240px, 68vw); }
   .shelf-scroll > *:first-child { margin-left: 20px; }
   .shelf-scroll > *:last-child  { margin-right: 20px; }
 
