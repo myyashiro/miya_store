@@ -42,8 +42,23 @@ const CHAT_ID_FALLBACK = WHATSAPP_GRUPO_ID ?? (WHATSAPP_DESTINO ? `${WHATSAPP_DE
 
 const LISTAR_GRUPOS = process.argv.includes('--listar-grupos');
 
-// Intervalo entre checagens (em horas)
-const INTERVALO_HORAS = Number(process.env.MONITOR_INTERVALO_HORAS ?? 3);
+// Horários fixos de checagem (horas inteiras)
+const HORARIOS_CHECAGEM = [8, 10, 12, 14, 16, 18, 20, 22];
+
+function proximoHorario() {
+  const agora = new Date();
+  const horaAtual = agora.getHours();
+  const minAtual = agora.getMinutes();
+  const proximo = HORARIOS_CHECAGEM.find(h => h > horaAtual || (h === horaAtual && minAtual === 0));
+  const alvo = new Date(agora);
+  if (proximo !== undefined) {
+    alvo.setHours(proximo, 0, 0, 0);
+  } else {
+    alvo.setDate(alvo.getDate() + 1);
+    alvo.setHours(HORARIOS_CHECAGEM[0], 0, 0, 0);
+  }
+  return alvo;
+}
 
 // Máximo de reenvios (gatilho de 2 dias) por janela de checagem
 const MAX_REENVIOS_POR_JANELA = Number(process.env.MONITOR_MAX_REENVIOS ?? 5);
@@ -82,6 +97,8 @@ async function getSheetRows() {
   const precoShopeeCol     = findCol('preco_shopee');
   const precoShopeeAntCol  = findCol('preco_shopee_anterior');
   const alertaEnviadoEmCol = findCol('alerta_enviado_em');
+  const statusMlCol        = findCol('status_ml');
+  const statusAmazonCol    = findCol('status_amazon');
 
   const rows = [];
   data.table.rows.forEach((row, gvizIndex) => {
@@ -120,6 +137,7 @@ async function getSheetRows() {
     precoAmazonCol, precoAmazonAntCol,
     precoShopeeCol, precoShopeeAntCol,
     alertaEnviadoEmCol,
+    statusMlCol, statusAmazonCol,
   };
 }
 
@@ -463,11 +481,11 @@ function alertaMaisDeNDias(alertaEnviadoEm, dias) {
 
 function buildPlataformaMsg(label, p) {
   if (!p) return '';
-  let linha = `🛍️ ${label}: `;
+  let linha = `🛍️ ${label}:`;
   if (p.dropped && p.precoAnterior) {
-    linha += `${formatMoeda(p.precoAnterior)} → *${formatMoeda(p.precoNovo)}* (-${p.desconto}%)`;
+    linha += `\nDe ~${formatMoeda(p.precoAnterior)}~ para ${formatMoeda(p.precoNovo)} (-${p.desconto}%)`;
   } else {
-    linha += formatMoeda(p.precoNovo);
+    linha += ` ${formatMoeda(p.precoNovo)}`;
   }
   if (p.url) linha += `\n${p.url}`;
   return linha;
@@ -476,8 +494,8 @@ function buildPlataformaMsg(label, p) {
 function buildMsg(a) {
   let msg = `${a.nome}\n\n`;
 
-  if (a.tipo === 'novo')   msg += `🆕 Novo produto monitorado!\n\n`;
-  if (a.tipo === 'queda')  msg += `🔥 Queda de preço detectada!\n\n`;
+  if (a.tipo === 'novo')   msg += `🆕 Novo produto!\n\n`;
+  if (a.tipo === 'queda')  msg += `🔥 Queda de preço!\n\n`;
 
   const partes = [
     buildPlataformaMsg('Mercado Livre', a.ml),
@@ -499,22 +517,17 @@ async function rodarChecagem(whatsappClient) {
     precoAmazonCol, precoAmazonAntCol,
     precoShopeeCol, precoShopeeAntCol,
     alertaEnviadoEmCol,
+    statusMlCol, statusAmazonCol,
   } = await getSheetRows();
   console.log(`Produtos encontrados: ${rows.length}`);
 
   const colMap = { precoMlCol, precoMlAntCol, precoAmazonCol, precoAmazonAntCol, precoShopeeCol, precoShopeeAntCol };
   const sheetUpdates = [];
+  const statusUpdates = [];
   const rowNumsAlertados = [];
   let reenviosNaJanela = 0;
 
-  const horaAtual = new Date().getHours();
-  const dentroDoHorario = horaAtual >= 9 && horaAtual <= 21;
-
   const enviarAlerta = async (alerta) => {
-    if (!dentroDoHorario) {
-      console.log(`🕐 Fora do horário (${horaAtual}h) — alerta de ${alerta.nome} ignorado.`);
-      return;
-    }
     if (!whatsappClient) return;
 
     const chatId = GRUPO_MAP[alerta.miya_group] ?? CHAT_ID_FALLBACK;
@@ -560,6 +573,17 @@ async function rodarChecagem(whatsappClient) {
       : { price: null, debug: 'sem link' };
     if (row.link_shopee) await sleep(1000);
 
+    // --- Status por marketplace ---
+    const agoraStatus = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    if (statusMlCol && row.link_ml_direto) {
+      const valor = mlPrice !== null ? `OK ${agoraStatus}` : `erro: ${mlDebug} (${agoraStatus})`;
+      statusUpdates.push({ range: `${SHEET_NAME}!${statusMlCol}${row.rowNum}`, values: [[valor]] });
+    }
+    if (statusAmazonCol && row.link_amazon) {
+      const valor = amazonPrice !== null ? `OK ${agoraStatus}` : `erro: ${amazonDebug} (${agoraStatus})`;
+      statusUpdates.push({ range: `${SHEET_NAME}!${statusAmazonCol}${row.rowNum}`, values: [[valor]] });
+    }
+
     if (mlPrice === null && amazonPrice === null && shopeePrice === null) {
       console.log(`❌ ${row.nome} — ML: ${mlDebug} | Amazon: ${amazonDebug} | Shopee: ${shopeeDebug}`);
       continue;
@@ -574,10 +598,10 @@ async function rodarChecagem(whatsappClient) {
     // Se o scraper retornou um preço, compara contra o valor armazenado na planilha.
     // Se o scraper ainda não está implementado (null), compara o valor manual contra o anterior.
     const quedaMl     = mlPrice     !== null && row.preco_ml              && mlPrice     < row.preco_ml;
-    const quedaAmazon = amazonPrice !== null && row.preco_amazon          && amazonPrice < row.preco_amazon
-                     || amazonPrice === null  && row.preco_amazon          && row.preco_amazon_anterior && row.preco_amazon < row.preco_amazon_anterior;
-    const quedaShopee = shopeePrice !== null && row.preco_shopee          && shopeePrice < row.preco_shopee
-                     || shopeePrice === null  && row.preco_shopee          && row.preco_shopee_anterior && row.preco_shopee < row.preco_shopee_anterior;
+    const quedaAmazon = (amazonPrice !== null && row.preco_amazon && amazonPrice < row.preco_amazon)
+                     || (amazonPrice === null && row.preco_amazon && row.preco_amazon_anterior && row.preco_amazon < row.preco_amazon_anterior);
+    const quedaShopee = (shopeePrice !== null && row.preco_shopee && shopeePrice < row.preco_shopee)
+                     || (shopeePrice === null && row.preco_shopee && row.preco_shopee_anterior && row.preco_shopee < row.preco_shopee_anterior);
     const temQueda = quedaMl || quedaAmazon || quedaShopee;
 
     const calcDesconto = (ant, novo) => Math.round(((ant - novo) / ant) * 100);
@@ -638,12 +662,14 @@ async function rodarChecagem(whatsappClient) {
     }
   }
 
-  if (sheetUpdates.length > 0 || (rowNumsAlertados.length > 0 && alertaEnviadoEmCol)) {
+  if (sheetUpdates.length > 0 || statusUpdates.length > 0 || (rowNumsAlertados.length > 0 && alertaEnviadoEmCol)) {
     const accessToken = await getGoogleAccessToken();
 
-    if (sheetUpdates.length > 0) {
-      console.log(`\nAtualizando ${sheetUpdates.length} entradas na planilha...`);
-      await updateSheetPrices(accessToken, sheetUpdates, colMap);
+    if (sheetUpdates.length > 0 || statusUpdates.length > 0) {
+      if (sheetUpdates.length > 0) console.log(`\nAtualizando ${sheetUpdates.length} preços na planilha...`);
+      if (statusUpdates.length > 0) console.log(`Gravando status de ${statusUpdates.length} scrapers...`);
+      if (sheetUpdates.length > 0) await updateSheetPrices(accessToken, sheetUpdates, colMap);
+      if (statusUpdates.length > 0) await batchUpdateSheet(accessToken, statusUpdates);
       console.log('Planilha atualizada.');
 
       const revalidateSecret = process.env.REVALIDATE_SECRET ?? 'miya2025';
@@ -658,7 +684,8 @@ async function rodarChecagem(whatsappClient) {
     }
   }
 
-  console.log(`\nPróxima checagem em ${INTERVALO_HORAS}h.`);
+  const prox = proximoHorario();
+  console.log(`\nPróxima checagem: ${prox.toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit', weekday: 'short' })}.`);
 }
 
 // --- Inicialização ---
@@ -705,9 +732,13 @@ client.on('ready', async () => {
   // Primeira checagem imediata ao iniciar
   await rodarChecagem(client);
 
-  // Loop contínuo
-  const intervaloMs = INTERVALO_HORAS * 60 * 60 * 1000;
-  setInterval(() => rodarChecagem(client), intervaloMs);
+  // Loop agendado nos horários fixos
+  while (true) {
+    const prox = proximoHorario();
+    const msAte = prox - new Date();
+    await sleep(msAte);
+    await rodarChecagem(client);
+  }
 });
 
 client.on('disconnected', (reason) => {
