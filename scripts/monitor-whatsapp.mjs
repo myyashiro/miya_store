@@ -26,14 +26,14 @@ const QRCode = require('qrcode');
 const SHEET_ID = process.env.SHEET_ID ?? process.env.NEXT_PUBLIC_SHEET_ID;
 const SHEET_NAME = 'PRODUTOS';
 
-// Mapeamento nome da coluna miya_group → ID do grupo WhatsApp
-// Configurar no .env.local: WHATSAPP_GRUPO_MIYA_STORE, WHATSAPP_GRUPO_MIYA_BEAUTY, etc.
-const GRUPO_MAP = {
-  'miya store':       process.env.WHATSAPP_GRUPO_MIYA_STORE,
-  'miya beauty':      process.env.WHATSAPP_GRUPO_MIYA_BEAUTY,
-  'miya fitness':     process.env.WHATSAPP_GRUPO_MIYA_FITNESS,
-  'miya collectibles': process.env.WHATSAPP_GRUPO_MIYA_COLLECTIBLES,
-};
+// Mapeamento dinâmico: lê todas as vars WHATSAPP_GRUPO_* do .env.local
+// Chave = sufixo em minúsculo com underscore → espaço (ex: MIYA_STORE → "miya store")
+// Lookup é case-insensitive: "Miya Store", "miya store" e "MIYA STORE" funcionam igual
+const GRUPO_MAP = Object.fromEntries(
+  Object.entries(process.env)
+    .filter(([k]) => k.startsWith('WHATSAPP_GRUPO_') && k !== 'WHATSAPP_GRUPO_ID')
+    .map(([k, v]) => [k.replace('WHATSAPP_GRUPO_', '').toLowerCase().replace(/_/g, ' '), v])
+);
 
 // Fallback legado: WHATSAPP_GRUPO_ID ou número individual
 const WHATSAPP_GRUPO_ID = process.env.WHATSAPP_GRUPO_ID;
@@ -48,8 +48,7 @@ const HORARIOS_CHECAGEM = [8, 10, 12, 14, 16, 18, 20, 22];
 function proximoHorario() {
   const agora = new Date();
   const horaAtual = agora.getHours();
-  const minAtual = agora.getMinutes();
-  const proximo = HORARIOS_CHECAGEM.find(h => h > horaAtual || (h === horaAtual && minAtual === 0));
+  const proximo = HORARIOS_CHECAGEM.find(h => h > horaAtual);
   const alvo = new Date(agora);
   if (proximo !== undefined) {
     alvo.setHours(proximo, 0, 0, 0);
@@ -567,7 +566,7 @@ async function rodarChecagem(whatsappClient) {
   const enviarAlerta = async (alerta) => {
     if (!whatsappClient) return;
 
-    const chatId = GRUPO_MAP[alerta.miya_group] ?? CHAT_ID_FALLBACK;
+    const chatId = GRUPO_MAP[(alerta.miya_group ?? '').toLowerCase()] ?? CHAT_ID_FALLBACK;
     if (!chatId) {
       console.warn(`⚠️  ${alerta.nome} — grupo "${alerta.miya_group}" sem ID configurado, alerta ignorado.`);
       return;
