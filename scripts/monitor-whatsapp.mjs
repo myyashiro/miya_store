@@ -483,7 +483,7 @@ function buildPlataformaMsg(label, p) {
   if (!p) return '';
   let linha = `🛍️ ${label}:`;
   if (p.dropped && p.precoAnterior) {
-    linha += `\nDe ~${formatMoeda(p.precoAnterior)}~ para ${formatMoeda(p.precoNovo)} (-${p.desconto}%)`;
+    linha += `\nDe ~${formatMoeda(p.precoAnterior)}~ por *${formatMoeda(p.precoNovo)}* (-${p.desconto}%)`;
   } else {
     linha += ` ${formatMoeda(p.precoNovo)}`;
   }
@@ -561,17 +561,17 @@ async function rodarChecagem(whatsappClient) {
     const { price: mlPrice, debug: mlDebug } = row.link_ml_direto
       ? await scrapePrice(row.link_ml_direto)
       : { price: null, debug: 'sem link' };
-    if (row.link_ml_direto) await sleep(1500);
+    if (row.link_ml_direto) await sleep(3000);
 
     const { price: amazonPrice, debug: amazonDebug } = row.link_amazon
       ? await scrapeAmazonPrice(row.link_amazon)
       : { price: null, debug: 'sem link' };
-    if (row.link_amazon) await sleep(1500);
+    if (row.link_amazon) await sleep(3000);
 
     const { price: shopeePrice, debug: shopeeDebug } = row.link_shopee
       ? await scrapeShopeePrice(row.link_shopee)
       : { price: null, debug: 'sem link' };
-    if (row.link_shopee) await sleep(1000);
+    if (row.link_shopee) await sleep(3000);
 
     // --- Status por marketplace ---
     const agoraStatus = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
