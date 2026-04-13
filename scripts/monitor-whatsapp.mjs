@@ -242,7 +242,7 @@ async function scrapePrice(url) {
         const json = JSON.parse(tag.replace(/<script[^>]*>/, '').replace('</script>', ''));
         const nodes = Array.isArray(json) ? json : [json];
         for (const node of nodes) {
-          const price = node?.offers?.price ?? node?.offers?.lowPrice ?? null;
+          const price = node?.offers?.lowPrice ?? node?.offers?.price ?? null;
           if (price) return { price: Number(price), debug: 'json-ld' };
         }
       } catch { }
@@ -313,18 +313,22 @@ async function scrapeAmazonPrice(url) {
         const json = JSON.parse(tag.replace(/<script[^>]*>/, '').replace('</script>', ''));
         const nodes = Array.isArray(json) ? json : [json];
         for (const node of nodes) {
-          const price = node?.offers?.price ?? node?.offers?.lowPrice ?? null;
+          const price = node?.offers?.lowPrice ?? node?.offers?.price ?? null;
           if (price && Number(price) > 0) return { price: Number(price), debug: 'json-ld' };
         }
       } catch { }
     }
 
-    // Estratégia 2: .a-offscreen (span com preço formatado "R$99,99")
-    const offscreenMatches = [...html.matchAll(/class="a-offscreen">R\$\s*([\d.,]+)/g)];
-    for (const m of offscreenMatches) {
-      const raw = m[1].replace(/\./g, '').replace(',', '.');
-      const price = Number(raw);
-      if (price > 0) return { price, debug: 'a-offscreen' };
+    // Estratégia 2: .a-offscreen dentro do bloco de preço principal do produto
+    // Limita a busca ao div específico de preço para não capturar preços de carrosséis de produtos relacionados
+    const priceSectionMatch = html.match(/id="corePriceDisplay_desktop_feature_div"([\s\S]{0,3000})/);
+    if (priceSectionMatch) {
+      const offscreenMatches = [...priceSectionMatch[1].matchAll(/class="a-offscreen">R\$\s*([\d.,]+)/g)];
+      for (const m of offscreenMatches) {
+        const raw = m[1].replace(/\./g, '').replace(',', '.');
+        const price = Number(raw);
+        if (price > 0) return { price, debug: 'a-offscreen' };
+      }
     }
 
     // Estratégia 3: priceblock_ourprice / priceblock_dealprice
