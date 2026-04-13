@@ -109,7 +109,8 @@ async function getSheetRows() {
 
     const link_ml_direto = get('link_ml_direto') ? String(get('link_ml_direto')) : undefined;
     const link_amazon_check = get('link_amazon') ? String(get('link_amazon')) : undefined;
-    if (!link_ml_direto && !link_amazon_check) return;
+    const link_shopee_check = get('link_shopee') ? String(get('link_shopee')) : undefined;
+    if (!link_ml_direto && !link_amazon_check && !link_shopee_check) return;
 
     rows.push({
       rowNum: gvizIndex + 2,
@@ -400,95 +401,6 @@ async function scrapeAmazonPrice(url) {
   }
 }
 
-async function scrapeShopeePrice(url) {
-  try {
-    // Resolve links encurtados (s.shopee.com.br) para extrair i.SHOPID.ITEMID
-    let finalUrl = url;
-    const idMatchDirect = url.match(/i\.(\d+)\.(\d+)/);
-    if (!idMatchDirect) {
-      const headRes = await fetch(url, {
-        method: 'HEAD',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        },
-        redirect: 'follow',
-      });
-      finalUrl = headRes.url ?? url;
-    }
-
-    // Shopee suporta dois formatos de URL:
-    // Desktop: https://shopee.com.br/xxx-i.SHOPID.ITEMID
-    // Mobile:  https://shopee.com.br/USERNAME/SHOPID/ITEMID
-    let shopId, itemId;
-    const desktopMatch = finalUrl.match(/i\.(\d+)\.(\d+)/);
-    if (desktopMatch) {
-      shopId = desktopMatch[1];
-      itemId = desktopMatch[2];
-    } else {
-      const mobileMatch = finalUrl.match(/shopee\.com\.br\/[^/?]+\/(\d+)\/(\d+)/);
-      if (mobileMatch) {
-        shopId = mobileMatch[1];
-        itemId = mobileMatch[2];
-      }
-    }
-    if (!shopId || !itemId) return { price: null, debug: `URL Shopee inválida (sem IDs em: ${finalUrl.substring(0, 80)})` };
-
-    // Estratégia 1: API interna da Shopee
-    const apiUrl = `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`;
-    const res = await fetch(apiUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'pt-BR,pt;q=0.9',
-        'Referer': url,
-        'x-api-source': 'pc',
-        'x-shopee-language': 'pt-BR',
-      },
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      // Preços na API Shopee vêm em "centavos de centavos" (dividir por 100000)
-      const raw = data?.data?.price_min ?? data?.data?.price ?? null;
-      if (raw != null) {
-        const price = Math.round((raw / 100000) * 100) / 100;
-        if (price > 0) return { price, debug: 'shopee-api' };
-      }
-    }
-
-    // Estratégia 2: HTML com __NEXT_DATA__ ou window.pageData
-    const htmlRes = await fetch(finalUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'pt-BR,pt;q=0.9',
-      },
-      redirect: 'follow',
-    });
-
-    if (!htmlRes.ok) return { price: null, debug: `html http ${htmlRes.status}` };
-    const html = await htmlRes.text();
-
-    const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
-    if (nextDataMatch) {
-      try {
-        const nextData = JSON.parse(nextDataMatch[1]);
-        const raw =
-          nextData?.props?.pageProps?.initialState?.pdpReducer?.itemInfo?.data?.price_min ??
-          nextData?.props?.pageProps?.initialState?.pdpReducer?.itemInfo?.data?.price ??
-          null;
-        if (raw != null) {
-          const price = Math.round((raw / 100000) * 100) / 100;
-          if (price > 0) return { price, debug: 'shopee-next-data' };
-        }
-      } catch { }
-    }
-
-    return { price: null, debug: `preço não encontrado (${html.length} bytes)` };
-  } catch (e) {
-    return { price: null, debug: `exceção: ${e.message}` };
-  }
-}
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -531,6 +443,7 @@ function buildPlataformaMsg(label, p) {
     linha += `\nDe ~${formatMoeda(p.precoAnterior)}~ por *${formatMoeda(p.precoNovo)}* (-${p.desconto}%)`;
   } else {
     linha += ` ${formatMoeda(p.precoNovo)}`;
+    if (p.manual) linha += ` _(checar)_`;
   }
   if (p.url) linha += `\n${p.url}`;
   return linha;
@@ -613,10 +526,8 @@ async function rodarChecagem(whatsappClient) {
       : { price: null, debug: 'sem link' };
     if (row.link_amazon) await sleep(3000);
 
-    const { price: shopeePrice, debug: shopeeDebug } = row.link_shopee
-      ? await scrapeShopeePrice(row.link_shopee)
-      : { price: null, debug: 'sem link' };
-    if (row.link_shopee) await sleep(3000);
+    // Shopee: sem scraper automático (site bloqueia bots). Usa valor manual da planilha.
+    const shopeePrice = null;
 
     // --- Status por marketplace ---
     const agoraStatus = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
@@ -629,8 +540,9 @@ async function rodarChecagem(whatsappClient) {
       statusUpdates.push({ range: `${SHEET_NAME}!${statusAmazonCol}${row.rowNum}`, values: [[valor]] });
     }
 
-    if (mlPrice === null && amazonPrice === null && shopeePrice === null) {
-      console.log(`❌ ${row.nome} — ML: ${mlDebug} | Amazon: ${amazonDebug} | Shopee: ${shopeeDebug}`);
+    const temDadoUtil = mlPrice !== null || amazonPrice !== null || row.preco_shopee != null;
+    if (!temDadoUtil) {
+      console.log(`❌ ${row.nome} — ML: ${mlDebug} | Amazon: ${amazonDebug} | Shopee: sem preço manual`);
       continue;
     }
 
@@ -682,6 +594,7 @@ async function rodarChecagem(whatsappClient) {
                        ) : null,
         url:           row.link_shopee,
         dropped:       quedaShopee,
+        manual:        shopeePrice === null,
       } : null,
     };
 
