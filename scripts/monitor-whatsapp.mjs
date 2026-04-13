@@ -290,7 +290,13 @@ async function scrapeAmazonPrice(url) {
     const isAmazon = parsed.hostname.includes('amazon.com') || parsed.hostname === 'amzn.to' || parsed.hostname === 'amzn.eu';
     if (!isAmazon) return { price: null, debug: 'hostname inválido' };
 
-    const res = await fetch(url, {
+    // Extrai o ASIN e constrói URL limpa — evita poluir o dashboard de afiliados com cliques do scraper
+    const asinMatch = parsed.pathname.match(/\/dp\/([A-Z0-9]{10})/);
+    const fetchUrl = asinMatch
+      ? `https://www.amazon.com.br/dp/${asinMatch[1]}`
+      : url;
+
+    const res = await fetch(fetchUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -376,8 +382,11 @@ async function scrapeAmazonPrice(url) {
     }
 
     // Estratégia 8: a-price-whole + a-price-fraction (DOM text, sem JS)
-    const wholeMatch = html.match(/class="a-price-whole">\s*([\d.,]+)/);
-    const fracMatch  = html.match(/class="a-price-fraction">\s*(\d{2})/);
+    // Restringe ao container central (centerCol/ppd) para evitar pegar preço de carrosséis de similares
+    const centerMatch = html.match(/id="(?:centerCol|ppd)"([\s\S]{0,15000})/);
+    const centerHtml  = centerMatch ? centerMatch[1] : '';
+    const wholeMatch = centerHtml.match(/class="a-price-whole">\s*([\d.,]+)/);
+    const fracMatch  = centerHtml.match(/class="a-price-fraction">\s*(\d{2})/);
     if (wholeMatch) {
       const whole = wholeMatch[1].replace(/[.,]/g, '');
       const frac  = fracMatch ? fracMatch[1] : '00';
