@@ -319,19 +319,27 @@ async function scrapeAmazonPrice(url) {
       } catch { }
     }
 
-    // Estratégia 2: .a-offscreen dentro do bloco de preço principal do produto
-    // Limita a busca ao div específico de preço para não capturar preços de carrosséis de produtos relacionados
-    const priceSectionMatch = html.match(/id="corePriceDisplay_desktop_feature_div"([\s\S]{0,3000})/);
-    if (priceSectionMatch) {
-      const offscreenMatches = [...priceSectionMatch[1].matchAll(/class="a-offscreen">R\$\s*([\d.,]+)/g)];
-      for (const m of offscreenMatches) {
-        const raw = m[1].replace(/\./g, '').replace(',', '.');
-        const price = Number(raw);
-        if (price > 0) return { price, debug: 'a-offscreen' };
+    // Estratégia 2: .a-offscreen dentro de blocos de preço conhecidos
+    // Tenta vários IDs de contêiner — a Amazon muda isso com frequência
+    const priceContainerIds = [
+      'corePriceDisplay_desktop_feature_div',
+      'apex_offerDisplay_desktop_feature_div',
+      'corePrice_desktop_feature_div',
+      'corePrice_feature_div',
+    ];
+    for (const containerId of priceContainerIds) {
+      const sectionMatch = html.match(new RegExp(`id="${containerId}"([\\s\\S]{0,3000})`));
+      if (sectionMatch) {
+        const offscreenMatches = [...sectionMatch[1].matchAll(/class="a-offscreen">R\$\s*([\d.,]+)/g)];
+        for (const m of offscreenMatches) {
+          const raw = m[1].replace(/\./g, '').replace(',', '.');
+          const price = Number(raw);
+          if (price > 0) return { price, debug: `a-offscreen (${containerId})` };
+        }
       }
     }
 
-    // Estratégia 3: priceblock_ourprice / priceblock_dealprice
+    // Estratégia 3: priceblock_ourprice / priceblock_dealprice (legado)
     const priceBlockMatch = html.match(/id="priceblock_(?:ourprice|dealprice)"[^>]*>\s*R\$\s*([\d.,]+)/);
     if (priceBlockMatch) {
       const raw = priceBlockMatch[1].replace(/\./g, '').replace(',', '.');
@@ -351,6 +359,31 @@ async function scrapeAmazonPrice(url) {
     if (priceAmountMatch) {
       const price = Number(priceAmountMatch[1]);
       if (price > 0) return { price, debug: 'priceAmount' };
+    }
+
+    // Estratégia 6: "displayPrice":"R$ 799,99" em JSON embutido
+    const displayPriceMatch = html.match(/"displayPrice"\s*:\s*"R\$\s*([\d.,]+)"/);
+    if (displayPriceMatch) {
+      const raw = displayPriceMatch[1].replace(/\./g, '').replace(',', '.');
+      const price = Number(raw);
+      if (price > 0) return { price, debug: 'displayPrice' };
+    }
+
+    // Estratégia 7: "price" em JSON de oferta (formato decimal americano, ex: "799.99")
+    const jsonPriceMatch = html.match(/"price"\s*:\s*"([\d]+\.[\d]{2})"/);
+    if (jsonPriceMatch) {
+      const price = Number(jsonPriceMatch[1]);
+      if (price > 0) return { price, debug: 'json-price-string' };
+    }
+
+    // Estratégia 8: a-price-whole + a-price-fraction (DOM text, sem JS)
+    const wholeMatch = html.match(/class="a-price-whole">\s*([\d.,]+)/);
+    const fracMatch  = html.match(/class="a-price-fraction">\s*(\d{2})/);
+    if (wholeMatch) {
+      const whole = wholeMatch[1].replace(/[.,]/g, '');
+      const frac  = fracMatch ? fracMatch[1] : '00';
+      const price = Number(`${whole}.${frac}`);
+      if (price > 0) return { price, debug: 'a-price-whole/fraction' };
     }
 
     return { price: null, debug: `html ok mas preço não encontrado (${html.length} bytes)` };
