@@ -59,9 +59,6 @@ function proximoHorario() {
   return alvo;
 }
 
-// Máximo de reenvios (gatilho de 2 dias) por janela de checagem
-const MAX_REENVIOS_POR_JANELA = Number(process.env.MONITOR_MAX_REENVIOS ?? 5);
-
 // --- Planilha ---
 
 function colIndexToLetter(index) {
@@ -96,8 +93,10 @@ async function getSheetRows() {
   const precoShopeeCol     = findCol('preco_shopee');
   const precoShopeeAntCol  = findCol('preco_shopee_anterior');
   const alertaEnviadoEmCol = findCol('alerta_enviado_em');
-  const statusMlCol        = findCol('status_ml');
-  const statusAmazonCol    = findCol('status_amazon');
+  const statusMlCol            = findCol('status_ml');
+  const statusAmazonCol        = findCol('status_amazon');
+  const precoMlAlertadoCol     = findCol('preco_ml_alertado');
+  const precoAmazonAlertadoCol = findCol('preco_amazon_alertado');
 
   const rows = [];
   data.table.rows.forEach((row, gvizIndex) => {
@@ -128,6 +127,8 @@ async function getSheetRows() {
       link_shopee:           get('link_shopee')           ? String(get('link_shopee'))  : undefined,
       alerta_enviado_em:     get('alerta_enviado_em')     ? String(get('alerta_enviado_em')) : undefined,
       miya_group:            get('miya_group')            ? String(get('miya_group')).toLowerCase().trim() : undefined,
+      preco_ml_alertado:     get('preco_ml_alertado')     != null ? Number(get('preco_ml_alertado'))     : undefined,
+      preco_amazon_alertado: get('preco_amazon_alertado') != null ? Number(get('preco_amazon_alertado')) : undefined,
     });
   });
 
@@ -138,6 +139,7 @@ async function getSheetRows() {
     precoShopeeCol, precoShopeeAntCol,
     alertaEnviadoEmCol,
     statusMlCol, statusAmazonCol,
+    precoMlAlertadoCol, precoAmazonAlertadoCol,
   };
 }
 
@@ -201,6 +203,10 @@ async function updateSheetPrices(accessToken, updates, colMap) {
     } else if (u.tipo === 'shopee') {
       push(colMap.precoShopeeCol,    u.rowNum, u.precoNovo);
       push(colMap.precoShopeeAntCol, u.rowNum, u.precoAnterior ?? '');
+    } else if (u.tipo === 'ml_alertado') {
+      push(colMap.precoMlAlertadoCol, u.rowNum, u.precoNovo);
+    } else if (u.tipo === 'amazon_alertado') {
+      push(colMap.precoAmazonAlertadoCol, u.rowNum, u.precoNovo);
     }
   }
   if (data.length > 0) await batchUpdateSheet(accessToken, data);
@@ -410,10 +416,6 @@ function formatMoeda(valor) {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-// Parseia data do alerta_enviado_em e verifica se passou mais de N dias.
-// Suporta dois formatos:
-//   "Date(2026,3,6,18,59,0)" — retorno da gviz API (mês 0-indexado)
-//   "06/04/2026, 18:59"      — texto puro gravado pelo script
 function alertaMaisDeNDias(alertaEnviadoEm, dias) {
   try {
     let data;
@@ -427,8 +429,7 @@ function alertaMaisDeNDias(alertaEnviadoEm, dias) {
       const [hours, minutes] = (timePart ?? '00:00').split(':');
       data = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes));
     }
-    const diffMs = Date.now() - data.getTime();
-    return diffMs > dias * 24 * 60 * 60 * 1000;
+    return Date.now() - data.getTime() > dias * 24 * 60 * 60 * 1000;
   } catch {
     return false;
   }
@@ -476,14 +477,16 @@ async function rodarChecagem(whatsappClient) {
     precoShopeeCol, precoShopeeAntCol,
     alertaEnviadoEmCol,
     statusMlCol, statusAmazonCol,
+    precoMlAlertadoCol, precoAmazonAlertadoCol,
   } = await getSheetRows();
   console.log(`Produtos encontrados: ${rows.length}`);
 
-  const colMap = { precoMlCol, precoMlAntCol, precoAmazonCol, precoAmazonAntCol, precoShopeeCol, precoShopeeAntCol };
+  const colMap = { precoMlCol, precoMlAntCol, precoAmazonCol, precoAmazonAntCol, precoShopeeCol, precoShopeeAntCol, precoMlAlertadoCol, precoAmazonAlertadoCol };
   const sheetUpdates = [];
   const statusUpdates = [];
   const rowNumsAlertados = [];
-  let reenviosNaJanela = 0;
+  const QUEDA_MIN_PCT = 5;
+  const DIAS_RESET    = 3;
 
   const enviarAlerta = async (alerta) => {
     if (!whatsappClient) return;
@@ -552,16 +555,18 @@ async function rodarChecagem(whatsappClient) {
     if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee', rowNum: row.rowNum, precoNovo: shopeePrice, precoAnterior: row.preco_shopee });
 
     // --- Detecção de quedas ---
-    // Se o scraper retornou um preço, compara contra o valor armazenado na planilha.
-    // Se o scraper ainda não está implementado (null), compara o valor manual contra o anterior.
-    const quedaMl     = mlPrice     !== null && row.preco_ml              && mlPrice     < row.preco_ml;
-    const quedaAmazon = (amazonPrice !== null && row.preco_amazon && amazonPrice < row.preco_amazon)
-                     || (amazonPrice === null && row.preco_amazon && row.preco_amazon_anterior && row.preco_amazon < row.preco_amazon_anterior);
+    const calcDesconto  = (ant, novo) => Math.round(((ant - novo) / ant) * 100);
+
+    const deveResetar    = !!row.alerta_enviado_em && alertaMaisDeNDias(row.alerta_enviado_em, DIAS_RESET);
+    const baselineMl     = deveResetar ? (mlPrice ?? row.preco_ml)         : (row.preco_ml_alertado     ?? row.preco_ml);
+    const baselineAmazon = deveResetar ? (amazonPrice ?? row.preco_amazon) : (row.preco_amazon_alertado ?? row.preco_amazon);
+
+    const quedaMl     = mlPrice     !== null && baselineMl     && mlPrice     < baselineMl     && calcDesconto(baselineMl,     mlPrice)     >= QUEDA_MIN_PCT;
+    const quedaAmazon = (amazonPrice !== null && baselineAmazon && amazonPrice < baselineAmazon && calcDesconto(baselineAmazon, amazonPrice) >= QUEDA_MIN_PCT)
+                     || (amazonPrice === null && row.preco_amazon && row.preco_amazon_anterior && row.preco_amazon < row.preco_amazon_anterior && calcDesconto(row.preco_amazon_anterior, row.preco_amazon) >= QUEDA_MIN_PCT);
     const quedaShopee = (shopeePrice !== null && row.preco_shopee && shopeePrice < row.preco_shopee)
                      || (shopeePrice === null && row.preco_shopee && row.preco_shopee_anterior && row.preco_shopee < row.preco_shopee_anterior);
     const temQueda = quedaMl || quedaAmazon || quedaShopee;
-
-    const calcDesconto = (ant, novo) => Math.round(((ant - novo) / ant) * 100);
 
     const alertaBase = {
       rowNum:     row.rowNum,
@@ -570,16 +575,16 @@ async function rodarChecagem(whatsappClient) {
       miya_group: row.miya_group,
       ml: mlPrice !== null ? {
         precoNovo:     mlPrice,
-        precoAnterior: row.preco_ml,
-        desconto:      quedaMl ? calcDesconto(row.preco_ml, mlPrice) : null,
+        precoAnterior: baselineMl,
+        desconto:      quedaMl ? calcDesconto(baselineMl, mlPrice) : null,
         url:           row.link_ml ?? row.link_ml_direto,
         dropped:       quedaMl,
       } : null,
       amazon: (amazonPrice !== null || row.preco_amazon) ? {
         precoNovo:     amazonPrice ?? row.preco_amazon,
-        precoAnterior: amazonPrice !== null ? row.preco_amazon : row.preco_amazon_anterior,
+        precoAnterior: amazonPrice !== null ? baselineAmazon : row.preco_amazon_anterior,
         desconto:      quedaAmazon ? calcDesconto(
-                         amazonPrice !== null ? row.preco_amazon : row.preco_amazon_anterior,
+                         amazonPrice !== null ? baselineAmazon : row.preco_amazon_anterior,
                          amazonPrice ?? row.preco_amazon
                        ) : null,
         url:           row.link_amazon,
@@ -602,19 +607,19 @@ async function rodarChecagem(whatsappClient) {
     if (!row.alerta_enviado_em) {
       console.log(`🆕 ${row.nome} — novo produto`);
       await enviarAlerta({ ...alertaBase, tipo: 'novo' });
+      if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
+      if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
     } else if (temQueda) {
-      if (quedaMl)     console.log(`🔥 ${row.nome} — ML: R$ ${row.preco_ml} → R$ ${mlPrice} (-${calcDesconto(row.preco_ml, mlPrice)}%)`);
-      if (quedaAmazon) console.log(`🔥 ${row.nome} — Amazon: R$ ${row.preco_amazon} → R$ ${amazonPrice} (-${calcDesconto(row.preco_amazon, amazonPrice)}%)`);
-      if (quedaShopee) console.log(`🔥 ${row.nome} — Shopee: R$ ${row.preco_shopee} → R$ ${shopeePrice} (-${calcDesconto(row.preco_shopee, shopeePrice)}%)`);
+      if (quedaMl)                             console.log(`🔥 ${row.nome} — ML: R$ ${baselineMl} → R$ ${mlPrice} (-${calcDesconto(baselineMl, mlPrice)}%)`);
+      if (quedaAmazon && amazonPrice !== null) console.log(`🔥 ${row.nome} — Amazon: R$ ${baselineAmazon} → R$ ${amazonPrice} (-${calcDesconto(baselineAmazon, amazonPrice)}%)`);
+      if (quedaShopee)                         console.log(`🔥 ${row.nome} — Shopee: R$ ${row.preco_shopee} → R$ ${shopeePrice} (-${calcDesconto(row.preco_shopee, shopeePrice)}%)`);
       await enviarAlerta({ ...alertaBase, tipo: 'queda' });
-    } else if (alertaMaisDeNDias(row.alerta_enviado_em, 2)) {
-      if (reenviosNaJanela >= MAX_REENVIOS_POR_JANELA) {
-        console.log(`⏭️  ${row.nome} — reenvio pulado (limite de ${MAX_REENVIOS_POR_JANELA} reenvios por janela atingido)`);
-      } else {
-        console.log(`🔁 ${row.nome} — reenvio (último alerta há mais de 2 dias)`);
-        await enviarAlerta({ ...alertaBase, tipo: 'reenvio' });
-        reenviosNaJanela++;
-      }
+      if (quedaMl)                             sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
+      if (quedaAmazon && amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
+    } else if (deveResetar) {
+      if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
+      if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
+      console.log(`🔄 ${row.nome} — baseline resetada (3+ dias sem alerta)`);
     } else {
       console.log(`✅ ${row.nome} — R$ ${mlPrice ?? '?'} (sem queda)`);
     }
