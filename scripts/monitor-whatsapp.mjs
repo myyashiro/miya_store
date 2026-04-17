@@ -619,9 +619,10 @@ async function rodarChecagem(whatsappClient) {
     } else if (deveResetar) {
       if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
       if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
-      console.log(`🔄 ${row.nome} — baseline resetada (3+ dias sem alerta)`);
+      console.log(`🔄 ${row.nome} — baseline resetada (${DIAS_RESET}+ dias desde o último alerta)`);
     } else {
-      console.log(`✅ ${row.nome} — R$ ${mlPrice ?? '?'} (sem queda)`);
+      const precoExibido = mlPrice !== null ? `ML: R$ ${mlPrice} (baseline R$ ${baselineMl})` : `R$ ? (sem scraping ML)`;
+      console.log(`✅ ${row.nome} — ${precoExibido}, sem queda`);
     }
   }
 
