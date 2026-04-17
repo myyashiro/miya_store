@@ -236,6 +236,12 @@ async function updateAlertaEnviadoEm(accessToken, rowNums, alertaEnviadoEmCol) {
 
 // --- Scraper ---
 
+function fetchWithTimeout(url, options = {}, ms = 15000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
+}
+
 async function scrapePrice(url) {
   try {
     const parsed = new URL(url);
@@ -247,7 +253,7 @@ async function scrapePrice(url) {
     const cleanUrl = itemIdMatch
       ? `${parsed.origin}${parsed.pathname}?pdp_filters=item_id%3A${itemIdMatch[1]}`
       : `${parsed.origin}${parsed.pathname}`;
-    const res = await fetch(cleanUrl, {
+    const res = await fetchWithTimeout(cleanUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -352,7 +358,7 @@ async function scrapeAmazonPrice(url) {
       ? `https://www.amazon.com.br/dp/${asinMatch[1]}`
       : url;
 
-    const res = await fetch(fetchUrl, {
+    const res = await fetchWithTimeout(fetchUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -521,7 +527,7 @@ async function scrapeShopeePrice(url) {
     const ts    = Math.floor(Date.now() / 1000);
     const sig   = createHash('sha256').update(`${SHOPEE_APP_ID}${ts}${body}${SHOPEE_SECRET}`).digest('hex');
 
-    const res = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
+    const res = await fetchWithTimeout('https://open-api.affiliate.shopee.com.br/graphql', {
       method: 'POST',
       headers: {
         Authorization: `SHA256 Credential=${SHOPEE_APP_ID}, Timestamp=${ts}, Signature=${sig}`,
