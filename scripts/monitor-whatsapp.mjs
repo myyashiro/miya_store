@@ -596,10 +596,10 @@ function buildPlataformaMsg(label, p) {
   if (p.cupom) {
     if (p.cupom.tipo === 'pct') {
       const efetivo = p.precoNovo * (1 - p.cupom.pct / 100);
-      linha += `\n🏷️ Cupom: -${p.cupom.pct}% → *${formatMoeda(efetivo)} efetivo*`;
+      linha += `\n🏷️ Cupom: -${p.cupom.pct}% (${formatMoeda(efetivo)})`;
     } else if (p.cupom.tipo === 'fixo') {
       const efetivo = p.precoNovo - p.cupom.valor;
-      linha += `\n🏷️ Cupom: -${formatMoeda(p.cupom.valor)} → *${formatMoeda(efetivo > 0 ? efetivo : 0)} efetivo*`;
+      linha += `\n🏷️ Cupom: -${formatMoeda(p.cupom.valor)} (${formatMoeda(efetivo > 0 ? efetivo : 0)})`;
     } else if (p.cupom.tipo === 'codigo') {
       linha += `\n🏷️ Cupom`;
       if (p.cupom.valor) linha += ` -${formatMoeda(p.cupom.valor)}`;
