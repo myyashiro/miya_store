@@ -630,8 +630,9 @@ async function rodarChecagem(whatsappClient) {
     precoAmazonCol, precoAmazonAntCol,
     precoShopeeCol, precoShopeeAntCol,
     alertaEnviadoEmCol,
-    statusMlCol, statusAmazonCol,
-    precoMlAlertadoCol, precoAmazonAlertadoCol,
+    statusMlCol, statusAmazonCol, statusShopeeCol,
+    precoMlAlertadoCol, precoAmazonAlertadoCol, precoShopeeAlertadoCol,
+    linkShopeeCol,
   } = await getSheetRows();
   console.log(`Produtos encontrados: ${rows.length}`);
 
