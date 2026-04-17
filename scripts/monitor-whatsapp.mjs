@@ -1,4 +1,4 @@
-import { createSign } from 'crypto';
+import { createSign, createHash } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -23,7 +23,9 @@ const require = createRequire(import.meta.url);
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 
-const SHEET_ID = process.env.SHEET_ID ?? process.env.NEXT_PUBLIC_SHEET_ID;
+const SHEET_ID        = process.env.SHEET_ID ?? process.env.NEXT_PUBLIC_SHEET_ID;
+const SHOPEE_APP_ID   = process.env.SHOPEE_AFFILIATE_APP_ID;
+const SHOPEE_SECRET   = process.env.SHOPEE_AFFILIATE_SECRET;
 const SHEET_NAME = 'PRODUTOS';
 
 // Mapeamento dinâmico: lê todas as vars WHATSAPP_GRUPO_* do .env.local
@@ -90,13 +92,16 @@ async function getSheetRows() {
   const precoMlAntCol      = findCol('preco_ml_anterior')     ?? 'O';
   const precoAmazonCol     = findCol('preco_amazon');
   const precoAmazonAntCol  = findCol('preco_amazon_anterior');
-  const precoShopeeCol     = findCol('preco_shopee');
-  const precoShopeeAntCol  = findCol('preco_shopee_anterior');
-  const alertaEnviadoEmCol = findCol('alerta_enviado_em');
+  const precoShopeeCol        = findCol('preco_shopee');
+  const precoShopeeAntCol     = findCol('preco_shopee_anterior');
+  const alertaEnviadoEmCol    = findCol('alerta_enviado_em');
   const statusMlCol            = findCol('status_ml');
   const statusAmazonCol        = findCol('status_amazon');
+  const statusShopeeCol        = findCol('status_shopee');
   const precoMlAlertadoCol     = findCol('preco_ml_alertado');
   const precoAmazonAlertadoCol = findCol('preco_amazon_alertado');
+  const precoShopeeAlertadoCol = findCol('preco_shopee_alertado');
+  const linkShopeeCol          = findCol('link_shopee');
 
   const rows = [];
   data.table.rows.forEach((row, gvizIndex) => {
@@ -106,10 +111,10 @@ async function getSheetRows() {
       return i >= 0 && cells[i] ? cells[i]?.v : undefined;
     };
 
-    const link_ml_direto = get('link_ml_direto') ? String(get('link_ml_direto')) : undefined;
-    const link_amazon_check = get('link_amazon') ? String(get('link_amazon')) : undefined;
-    const link_shopee_check = get('link_shopee') ? String(get('link_shopee')) : undefined;
-    if (!link_ml_direto && !link_amazon_check && !link_shopee_check) return;
+    const link_ml_direto     = get('link_ml_direto')     ? String(get('link_ml_direto'))     : undefined;
+    const link_amazon_check  = get('link_amazon')        ? String(get('link_amazon'))        : undefined;
+    const link_shopee_direto = get('link_shopee_direto') ? String(get('link_shopee_direto')) : undefined;
+    if (!link_ml_direto && !link_amazon_check && !link_shopee_direto) return;
 
     rows.push({
       rowNum: gvizIndex + 2,
@@ -122,8 +127,10 @@ async function getSheetRows() {
       preco_amazon:          get('preco_amazon')          != null ? Number(get('preco_amazon'))          : undefined,
       preco_amazon_anterior: get('preco_amazon_anterior') != null ? Number(get('preco_amazon_anterior')) : undefined,
       link_amazon:           get('link_amazon')           ? String(get('link_amazon'))  : undefined,
+      link_shopee_direto,
       preco_shopee:          get('preco_shopee')          != null ? Number(get('preco_shopee'))          : undefined,
       preco_shopee_anterior: get('preco_shopee_anterior') != null ? Number(get('preco_shopee_anterior')) : undefined,
+      preco_shopee_alertado: get('preco_shopee_alertado') != null ? Number(get('preco_shopee_alertado')) : undefined,
       link_shopee:           get('link_shopee')           ? String(get('link_shopee'))  : undefined,
       alerta_enviado_em:     get('alerta_enviado_em')     ? String(get('alerta_enviado_em')) : undefined,
       miya_group:            get('miya_group')            ? String(get('miya_group')).toLowerCase().trim() : undefined,
@@ -138,8 +145,9 @@ async function getSheetRows() {
     precoAmazonCol, precoAmazonAntCol,
     precoShopeeCol, precoShopeeAntCol,
     alertaEnviadoEmCol,
-    statusMlCol, statusAmazonCol,
-    precoMlAlertadoCol, precoAmazonAlertadoCol,
+    statusMlCol, statusAmazonCol, statusShopeeCol,
+    precoMlAlertadoCol, precoAmazonAlertadoCol, precoShopeeAlertadoCol,
+    linkShopeeCol,
   };
 }
 
@@ -207,6 +215,10 @@ async function updateSheetPrices(accessToken, updates, colMap) {
       push(colMap.precoMlAlertadoCol, u.rowNum, u.precoNovo);
     } else if (u.tipo === 'amazon_alertado') {
       push(colMap.precoAmazonAlertadoCol, u.rowNum, u.precoNovo);
+    } else if (u.tipo === 'shopee_alertado') {
+      push(colMap.precoShopeeAlertadoCol, u.rowNum, u.precoNovo);
+    } else if (u.tipo === 'link_shopee') {
+      push(colMap.linkShopeeCol, u.rowNum, u.valor);
     }
   }
   if (data.length > 0) await batchUpdateSheet(accessToken, data);
@@ -495,6 +507,44 @@ async function scrapeAmazonPrice(url) {
   }
 }
 
+async function scrapeShopeePrice(url) {
+  try {
+    if (!SHOPEE_APP_ID || !SHOPEE_SECRET) return { price: null, debug: 'credenciais Shopee não configuradas', offerLink: null };
+
+    const parsed = new URL(url);
+    const m = parsed.pathname.match(/\/product\/(\d+)\/(\d+)/) ?? parsed.pathname.match(/[.-]i\.(\d+)\.(\d+)/);
+    if (!m) return { price: null, debug: 'IDs não extraídos da URL', offerLink: null };
+
+    const [, shopid, itemid] = m;
+    const query = `{ productOfferV2(itemId: ${itemid}, shopId: ${shopid}, limit: 1) { nodes { priceMin priceMax offerLink } } }`;
+    const body  = JSON.stringify({ query });
+    const ts    = Math.floor(Date.now() / 1000);
+    const sig   = createHash('sha256').update(`${SHOPEE_APP_ID}${ts}${body}${SHOPEE_SECRET}`).digest('hex');
+
+    const res = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
+      method: 'POST',
+      headers: {
+        Authorization: `SHA256 Credential=${SHOPEE_APP_ID}, Timestamp=${ts}, Signature=${sig}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
+
+    if (!res.ok) return { price: null, debug: `http ${res.status}`, offerLink: null };
+
+    const json = await res.json();
+    const item = json?.data?.productOfferV2?.nodes?.[0];
+    if (!item) return { price: null, debug: 'produto não encontrado na API', offerLink: null };
+
+    const price = Number(item.priceMin ?? item.priceMax);
+    if (!price) return { price: null, debug: 'preço ausente na resposta', offerLink: null };
+
+    return { price, offerLink: item.offerLink ?? null, debug: 'shopee-affiliate-api' };
+  } catch (e) {
+    return { price: null, debug: `exceção: ${e.message}`, offerLink: null };
+  }
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -532,6 +582,10 @@ function buildPlataformaMsg(label, p) {
   } else {
     linha += ` ${formatMoeda(p.precoNovo)}`;
     if (p.manual) linha += ` _(checar)_`;
+  }
+  if (p.pixPct) {
+    const pix = p.precoNovo * (1 - p.pixPct / 100);
+    linha += `\n💳 No Pix: *${formatMoeda(pix)}* (-${p.pixPct}%)`;
   }
   if (p.cupom) {
     if (p.cupom.tipo === 'pct') {
@@ -581,7 +635,7 @@ async function rodarChecagem(whatsappClient) {
   } = await getSheetRows();
   console.log(`Produtos encontrados: ${rows.length}`);
 
-  const colMap = { precoMlCol, precoMlAntCol, precoAmazonCol, precoAmazonAntCol, precoShopeeCol, precoShopeeAntCol, precoMlAlertadoCol, precoAmazonAlertadoCol };
+  const colMap = { precoMlCol, precoMlAntCol, precoAmazonCol, precoAmazonAntCol, precoShopeeCol, precoShopeeAntCol, precoMlAlertadoCol, precoAmazonAlertadoCol, precoShopeeAlertadoCol, linkShopeeCol };
   const sheetUpdates = [];
   const statusUpdates = [];
   const rowNumsAlertados = [];
@@ -630,8 +684,10 @@ async function rodarChecagem(whatsappClient) {
       : { price: null, debug: 'sem link', cupom: null };
     if (row.link_amazon) await sleep(3000);
 
-    // Shopee: sem scraper automático (site bloqueia bots). Usa valor manual da planilha.
-    const shopeePrice = null;
+    const { price: shopeePrice, debug: shopeeDebug, offerLink: shopeeOfferLink } = row.link_shopee_direto
+      ? await scrapeShopeePrice(row.link_shopee_direto)
+      : { price: null, debug: 'sem link', offerLink: null };
+    if (row.link_shopee_direto) await sleep(2000);
 
     // --- Status por marketplace ---
     const agoraStatus = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
@@ -643,10 +699,14 @@ async function rodarChecagem(whatsappClient) {
       const valor = amazonPrice !== null ? `OK ${agoraStatus}` : `erro: ${amazonDebug} (${agoraStatus})`;
       statusUpdates.push({ range: `${SHEET_NAME}!${statusAmazonCol}${row.rowNum}`, values: [[valor]] });
     }
+    if (statusShopeeCol && row.link_shopee_direto) {
+      const valor = shopeePrice !== null ? `OK ${agoraStatus}` : `erro: ${shopeeDebug} (${agoraStatus})`;
+      statusUpdates.push({ range: `${SHEET_NAME}!${statusShopeeCol}${row.rowNum}`, values: [[valor]] });
+    }
 
-    const temDadoUtil = mlPrice !== null || amazonPrice !== null || row.preco_shopee != null;
+    const temDadoUtil = mlPrice !== null || amazonPrice !== null || shopeePrice !== null || row.preco_shopee != null;
     if (!temDadoUtil) {
-      console.log(`❌ ${row.nome} — ML: ${mlDebug} | Amazon: ${amazonDebug} | Shopee: sem preço manual`);
+      console.log(`❌ ${row.nome} — ML: ${mlDebug} | Amazon: ${amazonDebug} | Shopee: ${shopeeDebug}`);
       continue;
     }
 
@@ -654,17 +714,19 @@ async function rodarChecagem(whatsappClient) {
     if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml',     rowNum: row.rowNum, precoNovo: mlPrice,     precoAnterior: row.preco_ml });
     if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon', rowNum: row.rowNum, precoNovo: amazonPrice, precoAnterior: row.preco_amazon });
     if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee', rowNum: row.rowNum, precoNovo: shopeePrice, precoAnterior: row.preco_shopee });
+    if (shopeeOfferLink)      sheetUpdates.push({ tipo: 'link_shopee', rowNum: row.rowNum, valor: shopeeOfferLink });
 
     // --- Detecção de quedas ---
-    const deveResetar    = !!row.alerta_enviado_em && alertaMaisDeNDias(row.alerta_enviado_em, DIAS_RESET);
-    const baselineMl     = deveResetar ? (mlPrice ?? row.preco_ml)         : (row.preco_ml_alertado     ?? row.preco_ml);
-    const baselineAmazon = deveResetar ? (amazonPrice ?? row.preco_amazon) : (row.preco_amazon_alertado ?? row.preco_amazon);
+    const deveResetar     = !!row.alerta_enviado_em && alertaMaisDeNDias(row.alerta_enviado_em, DIAS_RESET);
+    const baselineMl      = deveResetar ? (mlPrice     ?? row.preco_ml)     : (row.preco_ml_alertado     ?? row.preco_ml);
+    const baselineAmazon  = deveResetar ? (amazonPrice ?? row.preco_amazon) : (row.preco_amazon_alertado ?? row.preco_amazon);
+    const baselineShopee  = deveResetar ? (shopeePrice ?? row.preco_shopee) : (row.preco_shopee_alertado ?? row.preco_shopee);
 
     const quedaMl     = mlPrice     !== null && baselineMl     && mlPrice     < baselineMl     && calcDesconto(baselineMl,     mlPrice)     >= QUEDA_MIN_PCT;
     const quedaAmazon = (amazonPrice !== null && baselineAmazon && amazonPrice < baselineAmazon && calcDesconto(baselineAmazon, amazonPrice) >= QUEDA_MIN_PCT)
                      || (amazonPrice === null && row.preco_amazon && row.preco_amazon_anterior && row.preco_amazon < row.preco_amazon_anterior && calcDesconto(row.preco_amazon_anterior, row.preco_amazon) >= QUEDA_MIN_PCT);
-    const quedaShopee = (shopeePrice !== null && row.preco_shopee && shopeePrice < row.preco_shopee)
-                     || (shopeePrice === null && row.preco_shopee && row.preco_shopee_anterior && row.preco_shopee < row.preco_shopee_anterior);
+    const quedaShopee = (shopeePrice !== null && baselineShopee && shopeePrice < baselineShopee && calcDesconto(baselineShopee, shopeePrice) >= QUEDA_MIN_PCT)
+                     || (shopeePrice === null && row.preco_shopee && row.preco_shopee_anterior && row.preco_shopee < row.preco_shopee_anterior && calcDesconto(row.preco_shopee_anterior, row.preco_shopee) >= QUEDA_MIN_PCT);
     const temQueda = quedaMl || quedaAmazon || quedaShopee;
 
     const alertaBase = {
@@ -693,14 +755,15 @@ async function rodarChecagem(whatsappClient) {
       } : null,
       shopee: (shopeePrice !== null || row.preco_shopee) ? {
         precoNovo:     shopeePrice ?? row.preco_shopee,
-        precoAnterior: shopeePrice !== null ? row.preco_shopee : row.preco_shopee_anterior,
+        precoAnterior: shopeePrice !== null ? baselineShopee : row.preco_shopee_anterior,
         desconto:      quedaShopee ? calcDesconto(
-                         shopeePrice !== null ? row.preco_shopee : row.preco_shopee_anterior,
+                         shopeePrice !== null ? baselineShopee : row.preco_shopee_anterior,
                          shopeePrice ?? row.preco_shopee
                        ) : null,
-        url:           row.link_shopee,
+        url:           shopeeOfferLink ?? row.link_shopee,
         dropped:       quedaShopee,
         manual:        shopeePrice === null,
+        pixPct:        shopeePrice !== null ? 5 : null,
       } : null,
     };
 
@@ -710,20 +773,27 @@ async function rodarChecagem(whatsappClient) {
       await enviarAlerta({ ...alertaBase, tipo: 'novo' });
       if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
       if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
+      if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee_alertado', rowNum: row.rowNum, precoNovo: shopeePrice });
     } else if (temQueda) {
       if (quedaMl)                             console.log(`🔥 ${row.nome} — ML: R$ ${baselineMl} → R$ ${mlPrice} (-${calcDesconto(baselineMl, mlPrice)}%)`);
       if (quedaAmazon && amazonPrice !== null) console.log(`🔥 ${row.nome} — Amazon: R$ ${baselineAmazon} → R$ ${amazonPrice} (-${calcDesconto(baselineAmazon, amazonPrice)}%)`);
-      if (quedaShopee)                         console.log(`🔥 ${row.nome} — Shopee: R$ ${row.preco_shopee} → R$ ${shopeePrice} (-${calcDesconto(row.preco_shopee, shopeePrice)}%)`);
+      if (quedaShopee && shopeePrice !== null) console.log(`🔥 ${row.nome} — Shopee: R$ ${baselineShopee} → R$ ${shopeePrice} (-${calcDesconto(baselineShopee, shopeePrice)}%)`);
       await enviarAlerta({ ...alertaBase, tipo: 'queda' });
       if (quedaMl)                             sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
       if (quedaAmazon && amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
+      if (quedaShopee && shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee_alertado', rowNum: row.rowNum, precoNovo: shopeePrice });
     } else if (deveResetar) {
       if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
       if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
+      if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee_alertado', rowNum: row.rowNum, precoNovo: shopeePrice });
       console.log(`🔄 ${row.nome} — baseline resetada (${DIAS_RESET}+ dias desde o último alerta)`);
     } else {
-      const precoExibido = mlPrice !== null ? `ML: R$ ${mlPrice} (baseline R$ ${baselineMl})` : `R$ ? (sem scraping ML)`;
-      console.log(`✅ ${row.nome} — ${precoExibido}, sem queda`);
+      const partes = [
+        mlPrice     !== null ? `ML: R$ ${mlPrice} (baseline R$ ${baselineMl})`         : null,
+        amazonPrice !== null ? `Amazon: R$ ${amazonPrice} (baseline R$ ${baselineAmazon})` : null,
+        shopeePrice !== null ? `Shopee: R$ ${shopeePrice} (baseline R$ ${baselineShopee})` : null,
+      ].filter(Boolean).join(' | ') || 'sem scraping';
+      console.log(`✅ ${row.nome} — ${partes}, sem queda`);
     }
   }
 
