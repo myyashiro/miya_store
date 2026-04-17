@@ -445,7 +445,6 @@ async function scrapeAmazonPrice(url) {
   }
 }
 
-
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -534,6 +533,7 @@ async function rodarChecagem(whatsappClient) {
   const rowNumsAlertados = [];
   const QUEDA_MIN_PCT = 5;
   const DIAS_RESET    = 3;
+  const calcDesconto  = (ant, novo) => Math.round(((ant - novo) / ant) * 100);
 
   const enviarAlerta = async (alerta) => {
     if (!whatsappClient) return;
@@ -602,8 +602,6 @@ async function rodarChecagem(whatsappClient) {
     if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee', rowNum: row.rowNum, precoNovo: shopeePrice, precoAnterior: row.preco_shopee });
 
     // --- Detecção de quedas ---
-    const calcDesconto  = (ant, novo) => Math.round(((ant - novo) / ant) * 100);
-
     const deveResetar    = !!row.alerta_enviado_em && alertaMaisDeNDias(row.alerta_enviado_em, DIAS_RESET);
     const baselineMl     = deveResetar ? (mlPrice ?? row.preco_ml)         : (row.preco_ml_alertado     ?? row.preco_ml);
     const baselineAmazon = deveResetar ? (amazonPrice ?? row.preco_amazon) : (row.preco_amazon_alertado ?? row.preco_amazon);
