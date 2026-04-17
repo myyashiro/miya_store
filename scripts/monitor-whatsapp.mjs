@@ -227,7 +227,7 @@ async function updateAlertaEnviadoEm(accessToken, rowNums, alertaEnviadoEmCol) {
 async function scrapePrice(url) {
   try {
     const parsed = new URL(url);
-    if (!parsed.hostname.endsWith('mercadolivre.com.br')) return { price: null, debug: 'hostname inválido' };
+    if (!parsed.hostname.endsWith('mercadolivre.com.br')) return { price: null, debug: 'hostname inválido', cupom: null };
 
     const cleanUrl = `${parsed.origin}${parsed.pathname}`;
     const res = await fetch(cleanUrl, {
@@ -239,55 +239,69 @@ async function scrapePrice(url) {
       redirect: 'follow',
     });
 
-    if (!res.ok) return { price: null, debug: `http ${res.status}` };
+    if (!res.ok) return { price: null, debug: `http ${res.status}`, cupom: null };
     const html = await res.text();
 
+    // --- Preço ---
+    let price = null;
+    let debug = `html ok mas preço não encontrado (${html.length} bytes)`;
+
     const ldBlocks = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g) ?? [];
-    for (const tag of ldBlocks) {
+    outer: for (const tag of ldBlocks) {
       try {
         const json = JSON.parse(tag.replace(/<script[^>]*>/, '').replace('</script>', ''));
         const nodes = Array.isArray(json) ? json : [json];
         for (const node of nodes) {
-          const price = node?.offers?.lowPrice ?? node?.offers?.price ?? null;
-          if (price) return { price: Number(price), debug: 'json-ld' };
+          const p = node?.offers?.lowPrice ?? node?.offers?.price ?? null;
+          if (p) { price = Number(p); debug = 'json-ld'; break outer; }
         }
       } catch { }
     }
 
-    const metaMatch = html.match(/<meta property="product:price:amount" content="([\d.,]+)"/);
-    if (metaMatch) {
-      const price = Number(metaMatch[1].replace(',', '.'));
-      if (price > 0) return { price, debug: 'meta-tag' };
+    if (!price) {
+      const metaMatch = html.match(/<meta property="product:price:amount" content="([\d.,]+)"/);
+      if (metaMatch) { const p = Number(metaMatch[1].replace(',', '.')); if (p > 0) { price = p; debug = 'meta-tag'; } }
+    }
+    if (!price) {
+      const m = html.match(/"offers"\s*:\s*\{"price"\s*:\s*([\d]+(?:\.\d{1,2})?)/);
+      if (m) { const p = Number(m[1]); if (p > 0) { price = p; debug = 'inline-script-offers'; } }
+    }
+    if (!price) {
+      const m = html.match(/"price"\s*:\s*([\d]+(?:\.\d{1,2})?)/);
+      if (m) { const p = Number(m[1]); if (p > 0) { price = p; debug = 'inline-script'; } }
+    }
+    if (!price) {
+      const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+      if (nextDataMatch) {
+        try {
+          const nextData = JSON.parse(nextDataMatch[1]);
+          const p = nextData?.props?.pageProps?.initialState?.pdp?.product?.price ?? nextData?.props?.pageProps?.price ?? null;
+          if (p) { price = Number(p); debug = 'next-data'; }
+        } catch { }
+      }
     }
 
-    // Busca "price" dentro de "offers" (preço promocional/correto)
-    const offersPriceMatch = html.match(/"offers"\s*:\s*\{"price"\s*:\s*([\d]+(?:\.\d{1,2})?)/);
-    if (offersPriceMatch) {
-      const price = Number(offersPriceMatch[1]);
-      if (price > 0) return { price, debug: 'inline-script-offers' };
+    // --- Cupom ML ---
+    let cupom = null;
+    const mlCouponPctJson = html.match(/"coupon_discount"\s*:\s*([\d.]+)/);
+    if (mlCouponPctJson) { const pct = Number(mlCouponPctJson[1]); if (pct > 0) cupom = { pct, tipo: 'pct' }; }
+
+    if (!cupom) {
+      const polySection = html.match(/poly-coupon[\s\S]{0,600}/i);
+      if (polySection) { const m = polySection[0].match(/(\d+)\s*%/); if (m) cupom = { pct: Number(m[1]), tipo: 'pct' }; }
     }
-    // Fallback: primeiro "price" genérico
-    const priceMatch = html.match(/"price"\s*:\s*([\d]+(?:\.\d{1,2})?)/);
-    if (priceMatch) {
-      const price = Number(priceMatch[1]);
-      if (price > 0) return { price, debug: 'inline-script' };
+    if (!cupom) {
+      const m = html.match(/cup[oô]m\s+de\s+(\d+)\s*%/i) ?? html.match(/(\d+)\s*%\s+(?:de\s+)?cup[oô]m/i);
+      if (m) cupom = { pct: Number(m[1]), tipo: 'pct' };
+    }
+    if (!cupom) {
+      const m = html.match(/cup[oô]m[^R\d]{0,40}R\$\s*([\d.,]+)/i);
+      if (m) { const valor = Number(m[1].replace(/\./g, '').replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo' }; }
     }
 
-    const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
-    if (nextDataMatch) {
-      try {
-        const nextData = JSON.parse(nextDataMatch[1]);
-        const priceFromNext =
-          nextData?.props?.pageProps?.initialState?.pdp?.product?.price ??
-          nextData?.props?.pageProps?.price ??
-          null;
-        if (priceFromNext) return { price: Number(priceFromNext), debug: 'next-data' };
-      } catch { }
-    }
-
-    return { price: null, debug: `html ok mas preço não encontrado (${html.length} bytes)` };
+    return { price, debug, cupom };
   } catch (e) {
-    return { price: null, debug: `exceção: ${e.message}` };
+    return { price: null, debug: `exceção: ${e.message}`, cupom: null };
   }
 }
 
@@ -295,7 +309,7 @@ async function scrapeAmazonPrice(url) {
   try {
     const parsed = new URL(url);
     const isAmazon = parsed.hostname.includes('amazon.com') || parsed.hostname === 'amzn.to' || parsed.hostname === 'amzn.eu';
-    if (!isAmazon) return { price: null, debug: 'hostname inválido' };
+    if (!isAmazon) return { price: null, debug: 'hostname inválido', cupom: null };
 
     // Extrai o ASIN e constrói URL limpa — evita poluir o dashboard de afiliados com cliques do scraper
     const asinMatch = parsed.pathname.match(/\/dp\/([A-Z0-9]{10})/);
@@ -315,95 +329,119 @@ async function scrapeAmazonPrice(url) {
       redirect: 'follow',
     });
 
-    if (!res.ok) return { price: null, debug: `http ${res.status}` };
+    if (!res.ok) return { price: null, debug: `http ${res.status}`, cupom: null };
     const html = await res.text();
+
+    // --- Preço ---
+    let price = null;
+    let debug = `html ok mas preço não encontrado (${html.length} bytes)`;
 
     // Estratégia 1: JSON-LD
     const ldBlocks = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g) ?? [];
-    for (const tag of ldBlocks) {
+    outer: for (const tag of ldBlocks) {
       try {
         const json = JSON.parse(tag.replace(/<script[^>]*>/, '').replace('</script>', ''));
         const nodes = Array.isArray(json) ? json : [json];
         for (const node of nodes) {
-          const price = node?.offers?.lowPrice ?? node?.offers?.price ?? null;
-          if (price && Number(price) > 0) return { price: Number(price), debug: 'json-ld' };
+          const p = node?.offers?.lowPrice ?? node?.offers?.price ?? null;
+          if (p && Number(p) > 0) { price = Number(p); debug = 'json-ld'; break outer; }
         }
       } catch { }
     }
 
     // Estratégia 2: .a-offscreen dentro de blocos de preço conhecidos
-    // Tenta vários IDs de contêiner — a Amazon muda isso com frequência
-    const priceContainerIds = [
-      'corePriceDisplay_desktop_feature_div',
-      'apex_offerDisplay_desktop_feature_div',
-      'corePrice_desktop_feature_div',
-      'corePrice_feature_div',
-    ];
-    for (const containerId of priceContainerIds) {
-      const sectionMatch = html.match(new RegExp(`id="${containerId}"([\\s\\S]{0,3000})`));
-      if (sectionMatch) {
-        const offscreenMatches = [...sectionMatch[1].matchAll(/class="a-offscreen">R\$\s*([\d.,]+)/g)];
-        for (const m of offscreenMatches) {
-          const raw = m[1].replace(/\./g, '').replace(',', '.');
-          const price = Number(raw);
-          if (price > 0) return { price, debug: `a-offscreen (${containerId})` };
+    if (!price) {
+      const priceContainerIds = [
+        'corePriceDisplay_desktop_feature_div',
+        'apex_offerDisplay_desktop_feature_div',
+        'corePrice_desktop_feature_div',
+        'corePrice_feature_div',
+      ];
+      for (const containerId of priceContainerIds) {
+        const sectionMatch = html.match(new RegExp(`id="${containerId}"([\\s\\S]{0,3000})`));
+        if (sectionMatch) {
+          const offscreenMatches = [...sectionMatch[1].matchAll(/class="a-offscreen">R\$\s*([\d.,]+)/g)];
+          for (const m of offscreenMatches) {
+            const p = Number(m[1].replace(/\./g, '').replace(',', '.'));
+            if (p > 0) { price = p; debug = `a-offscreen (${containerId})`; break; }
+          }
         }
+        if (price) break;
       }
     }
 
     // Estratégia 3: priceblock_ourprice / priceblock_dealprice (legado)
-    const priceBlockMatch = html.match(/id="priceblock_(?:ourprice|dealprice)"[^>]*>\s*R\$\s*([\d.,]+)/);
-    if (priceBlockMatch) {
-      const raw = priceBlockMatch[1].replace(/\./g, '').replace(',', '.');
-      const price = Number(raw);
-      if (price > 0) return { price, debug: 'priceblock' };
+    if (!price) {
+      const m = html.match(/id="priceblock_(?:ourprice|dealprice)"[^>]*>\s*R\$\s*([\d.,]+)/);
+      if (m) { const p = Number(m[1].replace(/\./g, '').replace(',', '.')); if (p > 0) { price = p; debug = 'priceblock'; } }
     }
 
-    // Estratégia 4: "buyingPrice" no HTML (JSON inline)
-    const buyingMatch = html.match(/"buyingPrice"\s*:\s*"?([\d.]+)"?/);
-    if (buyingMatch) {
-      const price = Number(buyingMatch[1]);
-      if (price > 0) return { price, debug: 'buyingPrice' };
+    // Estratégia 4: "buyingPrice"
+    if (!price) {
+      const m = html.match(/"buyingPrice"\s*:\s*"?([\d.]+)"?/);
+      if (m) { const p = Number(m[1]); if (p > 0) { price = p; debug = 'buyingPrice'; } }
     }
 
-    // Estratégia 5: "priceAmount" no HTML
-    const priceAmountMatch = html.match(/"priceAmount"\s*:\s*([\d.]+)/);
-    if (priceAmountMatch) {
-      const price = Number(priceAmountMatch[1]);
-      if (price > 0) return { price, debug: 'priceAmount' };
+    // Estratégia 5: "priceAmount"
+    if (!price) {
+      const m = html.match(/"priceAmount"\s*:\s*([\d.]+)/);
+      if (m) { const p = Number(m[1]); if (p > 0) { price = p; debug = 'priceAmount'; } }
     }
 
-    // Estratégia 6: "displayPrice":"R$ 799,99" em JSON embutido
-    const displayPriceMatch = html.match(/"displayPrice"\s*:\s*"R\$\s*([\d.,]+)"/);
-    if (displayPriceMatch) {
-      const raw = displayPriceMatch[1].replace(/\./g, '').replace(',', '.');
-      const price = Number(raw);
-      if (price > 0) return { price, debug: 'displayPrice' };
+    // Estratégia 6: "displayPrice":"R$ 799,99"
+    if (!price) {
+      const m = html.match(/"displayPrice"\s*:\s*"R\$\s*([\d.,]+)"/);
+      if (m) { const p = Number(m[1].replace(/\./g, '').replace(',', '.')); if (p > 0) { price = p; debug = 'displayPrice'; } }
     }
 
-    // Estratégia 7: "price" em JSON de oferta (formato decimal americano, ex: "799.99")
-    const jsonPriceMatch = html.match(/"price"\s*:\s*"([\d]+\.[\d]{2})"/);
-    if (jsonPriceMatch) {
-      const price = Number(jsonPriceMatch[1]);
-      if (price > 0) return { price, debug: 'json-price-string' };
+    // Estratégia 7: "price":"799.99"
+    if (!price) {
+      const m = html.match(/"price"\s*:\s*"([\d]+\.[\d]{2})"/);
+      if (m) { const p = Number(m[1]); if (p > 0) { price = p; debug = 'json-price-string'; } }
     }
 
-    // Estratégia 8: a-price-whole + a-price-fraction (DOM text, sem JS)
-    // Restringe ao container central (centerCol/ppd) para evitar pegar preço de carrosséis de similares
-    const centerMatch = html.match(/id="(?:centerCol|ppd)"([\s\S]{0,15000})/);
-    const centerHtml  = centerMatch ? centerMatch[1] : '';
-    const wholeMatch = centerHtml.match(/class="a-price-whole">\s*([\d.,]+)/);
-    const fracMatch  = centerHtml.match(/class="a-price-fraction">\s*(\d{2})/);
-    if (wholeMatch) {
-      const whole = wholeMatch[1].replace(/[.,]/g, '');
-      const frac  = fracMatch ? fracMatch[1] : '00';
-      const price = Number(`${whole}.${frac}`);
-      if (price > 0) return { price, debug: 'a-price-whole/fraction' };
+    // Estratégia 8: a-price-whole + a-price-fraction (restringe ao container central)
+    if (!price) {
+      const centerMatch = html.match(/id="(?:centerCol|ppd)"([\s\S]{0,15000})/);
+      const centerHtml  = centerMatch ? centerMatch[1] : '';
+      const wholeMatch  = centerHtml.match(/class="a-price-whole">\s*([\d.,]+)/);
+      const fracMatch   = centerHtml.match(/class="a-price-fraction">\s*(\d{2})/);
+      if (wholeMatch) {
+        const p = Number(`${wholeMatch[1].replace(/[.,]/g, '')}.${fracMatch ? fracMatch[1] : '00'}`);
+        if (p > 0) { price = p; debug = 'a-price-whole/fraction'; }
+      }
     }
 
-    return { price: null, debug: `html ok mas preço não encontrado (${html.length} bytes)` };
+    // --- Cupom Amazon ---
+    let cupom = null;
+    // Padrão 1: "Aplique o cupom de X%"
+    const apliqueMatch = html.match(/Aplique o cup[oô]m de (\d+)%/i);
+    if (apliqueMatch) cupom = { pct: Number(apliqueMatch[1]), tipo: 'pct' };
+
+    // Padrão 2: bloco couponBadge com percentual
+    if (!cupom) {
+      const badgeSection = html.match(/id="couponBadge[^"]*"[\s\S]{0,300}/);
+      if (badgeSection) { const m = badgeSection[0].match(/(\d+)%/); if (m) cupom = { pct: Number(m[1]), tipo: 'pct' }; }
+    }
+    // Padrão 3: "promotionPercent" no JSON inline
+    if (!cupom) {
+      const m = html.match(/"promotionPercent"\s*:\s*(\d+)/);
+      if (m) cupom = { pct: Number(m[1]), tipo: 'pct' };
+    }
+    // Padrão 4: texto genérico "cupom X%" próximo à seção de preço
+    if (!cupom) {
+      const m = html.match(/cup[oô]m[^%\d]{0,60}(\d+)\s*%/i);
+      if (m) cupom = { pct: Number(m[1]), tipo: 'pct' };
+    }
+    // Padrão 5: cupom em valor fixo (R$)
+    if (!cupom) {
+      const m = html.match(/cup[oô]m[^R\d]{0,40}R\$\s*([\d.,]+)/i);
+      if (m) { const valor = Number(m[1].replace(/\./g, '').replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo' }; }
+    }
+
+    return { price, debug, cupom };
   } catch (e) {
-    return { price: null, debug: `exceção: ${e.message}` };
+    return { price: null, debug: `exceção: ${e.message}`, cupom: null };
   }
 }
 
@@ -445,6 +483,15 @@ function buildPlataformaMsg(label, p) {
   } else {
     linha += ` ${formatMoeda(p.precoNovo)}`;
     if (p.manual) linha += ` _(checar)_`;
+  }
+  if (p.cupom) {
+    if (p.cupom.tipo === 'pct') {
+      const efetivo = p.precoNovo * (1 - p.cupom.pct / 100);
+      linha += `\n🏷️ Cupom: -${p.cupom.pct}% → *${formatMoeda(efetivo)} efetivo*`;
+    } else {
+      const efetivo = p.precoNovo - p.cupom.valor;
+      linha += `\n🏷️ Cupom: -${formatMoeda(p.cupom.valor)} → *${formatMoeda(efetivo > 0 ? efetivo : 0)} efetivo*`;
+    }
   }
   if (p.url) linha += `\n${p.url}`;
   return linha;
@@ -519,14 +566,14 @@ async function rodarChecagem(whatsappClient) {
 
   for (const row of rows) {
     // --- Scraping ---
-    const { price: mlPrice, debug: mlDebug } = row.link_ml_direto
+    const { price: mlPrice, debug: mlDebug, cupom: mlCupom } = row.link_ml_direto
       ? await scrapePrice(row.link_ml_direto)
-      : { price: null, debug: 'sem link' };
+      : { price: null, debug: 'sem link', cupom: null };
     if (row.link_ml_direto) await sleep(3000);
 
-    const { price: amazonPrice, debug: amazonDebug } = row.link_amazon
+    const { price: amazonPrice, debug: amazonDebug, cupom: amazonCupom } = row.link_amazon
       ? await scrapeAmazonPrice(row.link_amazon)
-      : { price: null, debug: 'sem link' };
+      : { price: null, debug: 'sem link', cupom: null };
     if (row.link_amazon) await sleep(3000);
 
     // Shopee: sem scraper automático (site bloqueia bots). Usa valor manual da planilha.
@@ -579,6 +626,7 @@ async function rodarChecagem(whatsappClient) {
         desconto:      quedaMl ? calcDesconto(baselineMl, mlPrice) : null,
         url:           row.link_ml ?? row.link_ml_direto,
         dropped:       quedaMl,
+        cupom:         mlCupom,
       } : null,
       amazon: (amazonPrice !== null || row.preco_amazon) ? {
         precoNovo:     amazonPrice ?? row.preco_amazon,
@@ -589,6 +637,7 @@ async function rodarChecagem(whatsappClient) {
                        ) : null,
         url:           row.link_amazon,
         dropped:       quedaAmazon,
+        cupom:         amazonCupom,
       } : null,
       shopee: (shopeePrice !== null || row.preco_shopee) ? {
         precoNovo:     shopeePrice ?? row.preco_shopee,
