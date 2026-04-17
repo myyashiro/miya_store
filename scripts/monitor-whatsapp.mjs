@@ -229,7 +229,12 @@ async function scrapePrice(url) {
     const parsed = new URL(url);
     if (!parsed.hostname.endsWith('mercadolivre.com.br')) return { price: null, debug: 'hostname inválido', cupom: null };
 
-    const cleanUrl = `${parsed.origin}${parsed.pathname}`;
+    // Preserva item_id de pdp_filters para URLs de família de produto (/p/)
+    const pdpFilters = parsed.searchParams.get('pdp_filters') ?? '';
+    const itemIdMatch = pdpFilters.match(/item_id%3A([A-Z0-9]+)/i) ?? pdpFilters.match(/item_id:([A-Z0-9]+)/i);
+    const cleanUrl = itemIdMatch
+      ? `${parsed.origin}${parsed.pathname}?pdp_filters=item_id%3A${itemIdMatch[1]}`
+      : `${parsed.origin}${parsed.pathname}`;
     const res = await fetch(cleanUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
