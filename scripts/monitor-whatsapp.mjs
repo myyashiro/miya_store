@@ -291,8 +291,26 @@ async function scrapePrice(url) {
       if (polySection) { const m = polySection[0].match(/(\d+)\s*%/); if (m) cupom = { pct: Number(m[1]), tipo: 'pct' }; }
     }
     if (!cupom) {
-      const m = html.match(/cup[oô]m\s+de\s+(\d+)\s*%/i) ?? html.match(/(\d+)\s*%\s+(?:de\s+)?cup[oô]m/i);
-      if (m) cupom = { pct: Number(m[1]), tipo: 'pct' };
+      // Cupom percentual: "15% OFF" dentro do bloco de awareness
+      const mPct = html.match(/ui-vpp-coupons-awareness[\s\S]{0,600}?(\d+)\s*%\s*OFF/)
+                ?? html.match(/cup[oô]m\s+de\s+(\d+)\s*%/i)
+                ?? html.match(/(\d+)\s*%\s+(?:de\s+)?cup[oô]m/i)
+                ?? html.match(/(\d+)\s*%\s*OFF\s*ser[aá]\s*aplicado/i)
+                ?? html.match(/Voc[eê]\s+economiza\s+R\$[\s\S]{0,10}com\s+cup[oô]m/i);
+      if (mPct?.[1]) cupom = { pct: Number(mPct[1]), tipo: 'pct' };
+    }
+    if (!cupom) {
+      // Cupom valor fixo: extrai valor do cupom e compra mínima (se houver)
+      const mFixo = html.match(/coupon-awareness-row-label[\s\S]{0,800}?aria-label="([\d,]+)\s*reais"[\s\S]{0,400}?OFF\.\s*Compra m[ií]nima[\s\S]{0,200}?aria-label="([\d,]+)\s*reais"/);
+      if (mFixo?.[1]) {
+        const valor = Number(mFixo[1].replace(',', '.'));
+        const minimo = mFixo[2] ? Number(mFixo[2].replace(',', '.')) : 0;
+        if (valor > 0 && (!minimo || (price && price >= minimo))) cupom = { valor, tipo: 'fixo' };
+      } else {
+        // Sem compra mínima
+        const mFixoSimples = html.match(/coupon-awareness-row-label[\s\S]{0,400}?aria-label="([\d,]+)\s*reais"/);
+        if (mFixoSimples?.[1]) { const valor = Number(mFixoSimples[1].replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo' }; }
+      }
     }
     if (!cupom) {
       const m = html.match(/cup[oô]m[^R\d]{0,40}R\$\s*([\d.,]+)/i);
@@ -438,6 +456,33 @@ async function scrapeAmazonPrice(url) {
       const m = html.match(/cup[oô]m[^R\d]{0,40}R\$\s*([\d.,]+)/i);
       if (m) { const valor = Number(m[1].replace(/\./g, '').replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo' }; }
     }
+    // Padrão 6: código de cupom com valor explícito — "Economize R$50 com o cupom PAISDOFUT"
+    // Ignora se restrito a primeira compra, app ou Prime
+    if (!cupom) {
+      const RESTRICOES = /primeira\s+compra|somente\s+no\s+app|v[aá]lido\s+somente\s+no\s+app|exclusivo\s+prime/i;
+      const mCod = html.match(/[Ee]conomize\s+R\$\s*([\d.,]+)\s+com\s+o\s+cup[oô]m\s+([A-Z0-9]+)/);
+      if (mCod) {
+        const idx = html.indexOf(mCod[0]);
+        const contexto = html.slice(Math.max(0, idx - 50), idx + 300);
+        if (!RESTRICOES.test(contexto)) {
+          const valor = Number(mCod[1].replace(/\./g, '').replace(',', '.'));
+          cupom = { valor, codigo: mCod[2], tipo: 'codigo' };
+        }
+      }
+    }
+    // Padrões 7+8: códigos de cupom Amazon — filtra por nome do código
+    // Códigos com APP ou PRIME no nome são restritos (primeira compra, somente app, Prime)
+    if (!cupom) {
+      const codigoRestrito = (cod) => /APP|PRIME|NEW/i.test(cod);
+      const candidatos = [
+        // "cupom: PAISDOFUT" ou "cupom PAISDOFUT" + "Desconto oferecido pela Amazon"
+        ...[...html.matchAll(/cup[oô]m:?\s+([A-Z0-9]{4,})\.?\s*Desconto oferecido pela Amazon/gi)].map(m => m[1]),
+        // "Cupom de desconto BLOCOS15 salvo em sua conta" via PSP
+        ...[...html.matchAll(/Cupom de desconto ([A-Z0-9]{4,}) salvo em sua conta[\s\S]{0,500}?navigate:psp/g)].map(m => m[1]),
+      ];
+      const codigo = candidatos.find(cod => !codigoRestrito(cod));
+      if (codigo) cupom = { codigo, tipo: 'codigo' };
+    }
 
     return { price, debug, cupom };
   } catch (e) {
@@ -487,9 +532,13 @@ function buildPlataformaMsg(label, p) {
     if (p.cupom.tipo === 'pct') {
       const efetivo = p.precoNovo * (1 - p.cupom.pct / 100);
       linha += `\n🏷️ Cupom: -${p.cupom.pct}% → *${formatMoeda(efetivo)} efetivo*`;
-    } else {
+    } else if (p.cupom.tipo === 'fixo') {
       const efetivo = p.precoNovo - p.cupom.valor;
       linha += `\n🏷️ Cupom: -${formatMoeda(p.cupom.valor)} → *${formatMoeda(efetivo > 0 ? efetivo : 0)} efetivo*`;
+    } else if (p.cupom.tipo === 'codigo') {
+      linha += `\n🏷️ Cupom`;
+      if (p.cupom.valor) linha += ` -${formatMoeda(p.cupom.valor)}`;
+      linha += `: *${p.cupom.codigo}* _(inserir no checkout)_`;
     }
   }
   if (p.url) linha += `\n${p.url}`;
