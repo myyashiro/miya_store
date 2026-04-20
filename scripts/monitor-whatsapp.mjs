@@ -1,5 +1,5 @@
 import { createSign, createHash } from 'crypto';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -21,12 +21,12 @@ if (existsSync(envPath)) {
 
 const require = createRequire(import.meta.url);
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
-const QRCode = require('qrcode');
+const QRCode                              = require('qrcode');
 
-const SHEET_ID        = process.env.SHEET_ID ?? process.env.NEXT_PUBLIC_SHEET_ID;
-const SHOPEE_APP_ID   = process.env.SHOPEE_AFFILIATE_APP_ID;
-const SHOPEE_SECRET   = process.env.SHOPEE_AFFILIATE_SECRET;
-const SHEET_NAME = 'PRODUTOS';
+const SHEET_ID      = process.env.SHEET_ID ?? process.env.NEXT_PUBLIC_SHEET_ID;
+const SHOPEE_APP_ID = process.env.SHOPEE_AFFILIATE_APP_ID;
+const SHOPEE_SECRET = process.env.SHOPEE_AFFILIATE_SECRET;
+const SHEET_NAME    = 'PRODUTOS';
 
 // Mapeamento dinâmico: lê todas as vars WHATSAPP_GRUPO_* do .env.local
 // Chave = sufixo em minúsculo com underscore → espaço (ex: MIYA_STORE → "miya store")
@@ -39,10 +39,38 @@ const GRUPO_MAP = Object.fromEntries(
 
 // Fallback legado: WHATSAPP_GRUPO_ID ou número individual
 const WHATSAPP_GRUPO_ID = process.env.WHATSAPP_GRUPO_ID;
-const WHATSAPP_DESTINO = process.env.WHATSAPP_DESTINO;
-const CHAT_ID_FALLBACK = WHATSAPP_GRUPO_ID ?? (WHATSAPP_DESTINO ? `${WHATSAPP_DESTINO}@c.us` : null);
+const WHATSAPP_DESTINO  = process.env.WHATSAPP_DESTINO;
+const CHAT_ID_FALLBACK  = WHATSAPP_GRUPO_ID ?? (WHATSAPP_DESTINO ? `${WHATSAPP_DESTINO}@c.us` : null);
 
 const LISTAR_GRUPOS = process.argv.includes('--listar-grupos');
+
+// --- Histórico SQLite (sql.js — puro JS, sem compilação nativa) ---
+const initSqlJs = require('sql.js');
+const SQL = await initSqlJs();
+const dbPath = resolve(__dirname, '../historico.db');
+const db = existsSync(dbPath)
+  ? new SQL.Database(readFileSync(dbPath))
+  : new SQL.Database();
+db.run(`
+  CREATE TABLE IF NOT EXISTS historico (
+    timestamp    TEXT NOT NULL,
+    nome         TEXT NOT NULL,
+    preco_ml     REAL,
+    preco_amazon REAL,
+    preco_shopee REAL
+  )
+`);
+
+function salvarHistorico(registros) {
+  const stmt = db.prepare(
+    'INSERT INTO historico (timestamp, nome, preco_ml, preco_amazon, preco_shopee) VALUES (?, ?, ?, ?, ?)'
+  );
+  for (const r of registros) {
+    stmt.run([r.timestamp, r.nome, r.preco_ml ?? null, r.preco_amazon ?? null, r.preco_shopee ?? null]);
+  }
+  stmt.free();
+  writeFileSync(dbPath, db.export());
+}
 
 // Horários fixos de checagem (horas inteiras)
 const HORARIOS_CHECAGEM = [8, 10, 12, 14, 16, 18, 20, 22];
@@ -88,22 +116,19 @@ async function getSheetRows() {
     return idx >= 0 ? colIndexToLetter(idx) : null;
   };
 
-  const precoMlCol         = findCol('preco_ml')              ?? 'H';
-  const precoMlAntCol      = findCol('preco_ml_anterior')     ?? 'O';
-  const precoAmazonCol     = findCol('preco_amazon');
-  const precoAmazonAntCol  = findCol('preco_amazon_anterior');
-  const precoShopeeCol        = findCol('preco_shopee');
-  const precoShopeeAntCol     = findCol('preco_shopee_anterior');
-  const alertaEnviadoEmCol    = findCol('alerta_enviado_em');
-  const statusMlCol            = findCol('status_ml');
-  const statusAmazonCol        = findCol('status_amazon');
-  const statusShopeeCol        = findCol('status_shopee');
-  const precoMlAlertadoCol     = findCol('preco_ml_alertado');
-  const precoAmazonAlertadoCol = findCol('preco_amazon_alertado');
-  const precoShopeeAlertadoCol = findCol('preco_shopee_alertado');
-  const linkShopeeCol          = findCol('link_shopee');
-  const cupomMlCol             = findCol('cupom_ml');
-  const cupomAmazonCol         = findCol('cupom_amazon');
+  const precoMlCol        = findCol('preco_ml')              ?? 'H';
+  const precoMlAntCol     = findCol('preco_ml_anterior')     ?? 'O';
+  const precoAmazonCol    = findCol('preco_amazon');
+  const precoAmazonAntCol = findCol('preco_amazon_anterior');
+  const precoShopeeCol    = findCol('preco_shopee');
+  const precoShopeeAntCol = findCol('preco_shopee_anterior');
+  const alertaEnviadoEmCol = findCol('alerta_enviado_em');
+  const statusMlCol       = findCol('status_ml');
+  const statusAmazonCol   = findCol('status_amazon');
+  const statusShopeeCol   = findCol('status_shopee');
+  const linkShopeeCol     = findCol('link_shopee');
+  const cupomMlCol        = findCol('cupom_ml');
+  const cupomAmazonCol    = findCol('cupom_amazon');
 
   const rows = [];
   data.table.rows.forEach((row, gvizIndex) => {
@@ -120,26 +145,23 @@ async function getSheetRows() {
 
     rows.push({
       rowNum: gvizIndex + 2,
-      nome: String(get('nome') ?? ''),
+      nome:   String(get('nome') ?? ''),
       link_ml_direto,
-      link_ml: get('link_ml') ? String(get('link_ml')) : undefined,
-      imagem: get('imagem') ? String(get('imagem')) : undefined,
-      preco_ml: get('preco_ml') != null ? Number(get('preco_ml')) : undefined,
-      preco_ml_anterior: get('preco_ml_anterior') != null ? Number(get('preco_ml_anterior')) : undefined,
+      link_ml:               get('link_ml')    ? String(get('link_ml'))    : undefined,
+      imagem:                get('imagem')      ? String(get('imagem'))      : undefined,
+      preco_ml:              get('preco_ml')              != null ? Number(get('preco_ml'))              : undefined,
+      preco_ml_anterior:     get('preco_ml_anterior')     != null ? Number(get('preco_ml_anterior'))     : undefined,
       preco_amazon:          get('preco_amazon')          != null ? Number(get('preco_amazon'))          : undefined,
       preco_amazon_anterior: get('preco_amazon_anterior') != null ? Number(get('preco_amazon_anterior')) : undefined,
       link_amazon:           get('link_amazon')           ? String(get('link_amazon'))  : undefined,
       link_shopee_direto,
       preco_shopee:          get('preco_shopee')          != null ? Number(get('preco_shopee'))          : undefined,
       preco_shopee_anterior: get('preco_shopee_anterior') != null ? Number(get('preco_shopee_anterior')) : undefined,
-      preco_shopee_alertado: get('preco_shopee_alertado') != null ? Number(get('preco_shopee_alertado')) : undefined,
       link_shopee:           get('link_shopee')           ? String(get('link_shopee'))  : undefined,
       alerta_enviado_em:     get('alerta_enviado_em')     ? String(get('alerta_enviado_em')) : undefined,
       miya_group:            get('miya_group')            ? String(get('miya_group')).toLowerCase().trim() : undefined,
-      preco_ml_alertado:     get('preco_ml_alertado')     != null ? Number(get('preco_ml_alertado'))     : undefined,
-      preco_amazon_alertado: get('preco_amazon_alertado') != null ? Number(get('preco_amazon_alertado')) : undefined,
-      cupom_ml:     get('cupom_ml')     ? String(get('cupom_ml'))     : undefined,
-      cupom_amazon: get('cupom_amazon') ? String(get('cupom_amazon')) : undefined,
+      cupom_ml:              get('cupom_ml')    ? String(get('cupom_ml'))    : undefined,
+      cupom_amazon:          get('cupom_amazon') ? String(get('cupom_amazon')) : undefined,
     });
   });
 
@@ -150,7 +172,6 @@ async function getSheetRows() {
     precoShopeeCol, precoShopeeAntCol,
     alertaEnviadoEmCol,
     statusMlCol, statusAmazonCol, statusShopeeCol,
-    precoMlAlertadoCol, precoAmazonAlertadoCol, precoShopeeAlertadoCol,
     linkShopeeCol,
     cupomMlCol, cupomAmazonCol,
   };
@@ -162,7 +183,7 @@ async function getGoogleAccessToken() {
   const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
   const now = Math.floor(Date.now() / 1000);
 
-  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const header  = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
   const payload = Buffer.from(JSON.stringify({
     iss: creds.client_email,
     scope: 'https://www.googleapis.com/auth/spreadsheets',
@@ -216,12 +237,6 @@ async function updateSheetPrices(accessToken, updates, colMap) {
     } else if (u.tipo === 'shopee') {
       push(colMap.precoShopeeCol,    u.rowNum, u.precoNovo);
       push(colMap.precoShopeeAntCol, u.rowNum, u.precoAnterior ?? '');
-    } else if (u.tipo === 'ml_alertado') {
-      push(colMap.precoMlAlertadoCol, u.rowNum, u.precoNovo);
-    } else if (u.tipo === 'amazon_alertado') {
-      push(colMap.precoAmazonAlertadoCol, u.rowNum, u.precoNovo);
-    } else if (u.tipo === 'shopee_alertado') {
-      push(colMap.precoShopeeAlertadoCol, u.rowNum, u.precoNovo);
     } else if (u.tipo === 'link_shopee') {
       push(colMap.linkShopeeCol, u.rowNum, u.valor);
     } else if (u.tipo === 'cupom_ml') {
@@ -313,6 +328,16 @@ async function scrapePrice(url) {
       }
     }
 
+    // Tenta "Melhor preço" (BEST_PRICE / CHEAPER) — substitui se for mais barato
+    {
+      const m = html.match(/"buying_option_id"\s*:\s*"BEST_PRICE"[^}]{0,200}"price"\s*:\s*(\d+)/)
+             ?? html.match(/"g_option_id"\s*:\s*"CHEAPER"[^}]{0,200}"price"\s*:\s*(\d+)/);
+      if (m) {
+        const p = Number(m[1]);
+        if (p > 0 && (!price || p < price)) { price = p; debug = 'melhor-preco'; }
+      }
+    }
+
     // --- Cupom ML ---
     let cupom = null;
     const mlCouponPctJson = html.match(/"coupon_discount"\s*:\s*([\d.]+)/);
@@ -323,7 +348,6 @@ async function scrapePrice(url) {
       if (polySection) { const m = polySection[0].match(/(\d+)\s*%/); if (m) cupom = { pct: Number(m[1]), tipo: 'pct' }; }
     }
     if (!cupom) {
-      // Cupom percentual: "15% OFF" dentro do bloco de awareness
       const mPct = html.match(/ui-vpp-coupons-awareness[\s\S]{0,600}?(\d+)\s*%\s*OFF/)
                 ?? html.match(/cup[oô]m\s+de\s+(\d+)\s*%/i)
                 ?? html.match(/(\d+)\s*%\s+(?:de\s+)?cup[oô]m/i)
@@ -332,14 +356,12 @@ async function scrapePrice(url) {
       if (mPct?.[1]) cupom = { pct: Number(mPct[1]), tipo: 'pct' };
     }
     if (!cupom) {
-      // Cupom valor fixo: extrai valor do cupom e compra mínima (se houver)
       const mFixo = html.match(/coupon-awareness-row-label[\s\S]{0,800}?aria-label="([\d,]+)\s*reais"[\s\S]{0,400}?OFF\.\s*Compra m[ií]nima[\s\S]{0,200}?aria-label="([\d,]+)\s*reais"/);
       if (mFixo?.[1]) {
         const valor = Number(mFixo[1].replace(',', '.'));
         const minimo = mFixo[2] ? Number(mFixo[2].replace(',', '.')) : 0;
         if (valor > 0 && (!minimo || (price && price >= minimo))) cupom = { valor, tipo: 'fixo' };
       } else {
-        // Sem compra mínima
         const mFixoSimples = html.match(/coupon-awareness-row-label[\s\S]{0,400}?aria-label="([\d,]+)\s*reais"/);
         if (mFixoSimples?.[1]) { const valor = Number(mFixoSimples[1].replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo' }; }
       }
@@ -363,9 +385,7 @@ async function scrapeAmazonPrice(url) {
 
     // Extrai o ASIN e constrói URL limpa — evita poluir o dashboard de afiliados com cliques do scraper
     const asinMatch = parsed.pathname.match(/\/dp\/([A-Z0-9]{10})/);
-    const fetchUrl = asinMatch
-      ? `https://www.amazon.com.br/dp/${asinMatch[1]}`
-      : url;
+    const fetchUrl = asinMatch ? `https://www.amazon.com.br/dp/${asinMatch[1]}` : url;
 
     const res = await fetchWithTimeout(fetchUrl, {
       headers: {
@@ -386,7 +406,6 @@ async function scrapeAmazonPrice(url) {
     let price = null;
     let debug = `html ok mas preço não encontrado (${html.length} bytes)`;
 
-    // Estratégia 1: JSON-LD
     const ldBlocks = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g) ?? [];
     outer: for (const tag of ldBlocks) {
       try {
@@ -399,7 +418,6 @@ async function scrapeAmazonPrice(url) {
       } catch { }
     }
 
-    // Estratégia 2: .a-offscreen dentro de blocos de preço conhecidos
     if (!price) {
       const priceContainerIds = [
         'corePriceDisplay_desktop_feature_div',
@@ -420,37 +438,26 @@ async function scrapeAmazonPrice(url) {
       }
     }
 
-    // Estratégia 3: priceblock_ourprice / priceblock_dealprice (legado)
     if (!price) {
       const m = html.match(/id="priceblock_(?:ourprice|dealprice)"[^>]*>\s*R\$\s*([\d.,]+)/);
       if (m) { const p = Number(m[1].replace(/\./g, '').replace(',', '.')); if (p > 0) { price = p; debug = 'priceblock'; } }
     }
-
-    // Estratégia 4: "buyingPrice"
     if (!price) {
       const m = html.match(/"buyingPrice"\s*:\s*"?([\d.]+)"?/);
       if (m) { const p = Number(m[1]); if (p > 0) { price = p; debug = 'buyingPrice'; } }
     }
-
-    // Estratégia 5: "priceAmount"
     if (!price) {
       const m = html.match(/"priceAmount"\s*:\s*([\d.]+)/);
       if (m) { const p = Number(m[1]); if (p > 0) { price = p; debug = 'priceAmount'; } }
     }
-
-    // Estratégia 6: "displayPrice":"R$ 799,99"
     if (!price) {
       const m = html.match(/"displayPrice"\s*:\s*"R\$\s*([\d.,]+)"/);
       if (m) { const p = Number(m[1].replace(/\./g, '').replace(',', '.')); if (p > 0) { price = p; debug = 'displayPrice'; } }
     }
-
-    // Estratégia 7: "price":"799.99"
     if (!price) {
       const m = html.match(/"price"\s*:\s*"([\d]+\.[\d]{2})"/);
       if (m) { const p = Number(m[1]); if (p > 0) { price = p; debug = 'json-price-string'; } }
     }
-
-    // Estratégia 8: a-price-whole + a-price-fraction (restringe ao container central)
     if (!price) {
       const centerMatch = html.match(/id="(?:centerCol|ppd)"([\s\S]{0,15000})/);
       const centerHtml  = centerMatch ? centerMatch[1] : '';
@@ -464,32 +471,25 @@ async function scrapeAmazonPrice(url) {
 
     // --- Cupom Amazon ---
     let cupom = null;
-    // Padrão 1: "Aplique o cupom de X%"
     const apliqueMatch = html.match(/Aplique o cup[oô]m de (\d+)%/i);
     if (apliqueMatch) cupom = { pct: Number(apliqueMatch[1]), tipo: 'pct' };
 
-    // Padrão 2: bloco couponBadge com percentual
     if (!cupom) {
       const badgeSection = html.match(/id="couponBadge[^"]*"[\s\S]{0,300}/);
       if (badgeSection) { const m = badgeSection[0].match(/(\d+)%/); if (m) cupom = { pct: Number(m[1]), tipo: 'pct' }; }
     }
-    // Padrão 3: "promotionPercent" no JSON inline
     if (!cupom) {
       const m = html.match(/"promotionPercent"\s*:\s*(\d+)/);
       if (m) cupom = { pct: Number(m[1]), tipo: 'pct' };
     }
-    // Padrão 4: texto genérico "cupom X%" próximo à seção de preço
     if (!cupom) {
       const m = html.match(/cup[oô]m[^%\d]{0,60}(\d+)\s*%/i);
       if (m) cupom = { pct: Number(m[1]), tipo: 'pct' };
     }
-    // Padrão 5: cupom em valor fixo (R$)
     if (!cupom) {
       const m = html.match(/cup[oô]m[^R\d]{0,40}R\$\s*([\d.,]+)/i);
       if (m) { const valor = Number(m[1].replace(/\./g, '').replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo' }; }
     }
-    // Padrão 6: código de cupom com valor explícito — "Economize R$50 com o cupom PAISDOFUT"
-    // Ignora se restrito a primeira compra, app ou Prime
     if (!cupom) {
       const RESTRICOES = /primeira\s+compra|somente\s+no\s+app|v[aá]lido\s+somente\s+no\s+app|exclusivo\s+prime/i;
       const mCod = html.match(/[Ee]conomize\s+R\$\s*([\d.,]+)\s+com\s+o\s+cup[oô]m\s+([A-Z0-9]+)/);
@@ -502,14 +502,10 @@ async function scrapeAmazonPrice(url) {
         }
       }
     }
-    // Padrões 7+8: códigos de cupom Amazon — filtra por nome do código
-    // Códigos com APP ou PRIME no nome são restritos (primeira compra, somente app, Prime)
     if (!cupom) {
       const codigoRestrito = (cod) => /APP|PRIME|NEW/i.test(cod);
       const candidatos = [
-        // "cupom: PAISDOFUT" ou "cupom PAISDOFUT" + "Desconto oferecido pela Amazon"
         ...[...html.matchAll(/cup[oô]m:?\s+([A-Z0-9]{4,})\.?\s*Desconto oferecido pela Amazon/gi)].map(m => m[1]),
-        // "Cupom de desconto BLOCOS15 salvo em sua conta" via PSP
         ...[...html.matchAll(/Cupom de desconto ([A-Z0-9]{4,}) salvo em sua conta[\s\S]{0,500}?navigate:psp/g)].map(m => m[1]),
       ];
       const codigo = candidatos.find(cod => !codigoRestrito(cod));
@@ -568,25 +564,6 @@ function formatMoeda(valor) {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function alertaMaisDeNDias(alertaEnviadoEm, dias) {
-  try {
-    let data;
-    const gviz = String(alertaEnviadoEm).match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+))?/);
-    if (gviz) {
-      const [, year, month, day, hours = 0, minutes = 0] = gviz;
-      data = new Date(Number(year), Number(month), Number(day), Number(hours), Number(minutes));
-    } else {
-      const [datePart, timePart] = String(alertaEnviadoEm).split(', ');
-      const [day, month, year] = datePart.split('/');
-      const [hours, minutes] = (timePart ?? '00:00').split(':');
-      data = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes));
-    }
-    return Date.now() - data.getTime() > dias * 24 * 60 * 60 * 1000;
-  } catch {
-    return false;
-  }
-}
-
 // --- Monitor ---
 
 function buildPlataformaMsg(label, p) {
@@ -622,9 +599,8 @@ function buildPlataformaMsg(label, p) {
 function buildMsg(a) {
   let msg = `${a.nome}\n\n`;
 
-  if (a.tipo === 'novo')   msg += `🆕 Novo produto!\n\n`;
-  if (a.tipo === 'queda')  msg += `🔥 Queda de preço!\n\n`;
-  if (a.tipo === 'cupom')  msg += `🏷️ Cupom disponível!\n\n`;
+  if (a.tipo === 'novo')  msg += `🆕 Novo produto!\n\n`;
+  if (a.tipo === 'queda') msg += `🔥 Queda de preço!\n\n`;
 
   const partes = [
     buildPlataformaMsg('Mercado Livre', a.ml),
@@ -647,18 +623,23 @@ async function rodarChecagem(whatsappClient) {
     precoShopeeCol, precoShopeeAntCol,
     alertaEnviadoEmCol,
     statusMlCol, statusAmazonCol, statusShopeeCol,
-    precoMlAlertadoCol, precoAmazonAlertadoCol, precoShopeeAlertadoCol,
     linkShopeeCol,
     cupomMlCol, cupomAmazonCol,
   } = await getSheetRows();
   console.log(`Produtos encontrados: ${rows.length}`);
 
-  const colMap = { precoMlCol, precoMlAntCol, precoAmazonCol, precoAmazonAntCol, precoShopeeCol, precoShopeeAntCol, precoMlAlertadoCol, precoAmazonAlertadoCol, precoShopeeAlertadoCol, linkShopeeCol, cupomMlCol, cupomAmazonCol };
+  const colMap = {
+    precoMlCol, precoMlAntCol,
+    precoAmazonCol, precoAmazonAntCol,
+    precoShopeeCol, precoShopeeAntCol,
+    linkShopeeCol,
+    cupomMlCol, cupomAmazonCol,
+  };
   const sheetUpdates = [];
   const statusUpdates = [];
   const rowNumsAlertados = [];
+  const historicoRegistros = [];
   const QUEDA_MIN_PCT = 5;
-  const DIAS_RESET    = 1;
   const calcDesconto  = (ant, novo) => Math.round(((ant - novo) / ant) * 100);
 
   const enviarAlerta = async (alerta) => {
@@ -733,26 +714,18 @@ async function rodarChecagem(whatsappClient) {
     if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon', rowNum: row.rowNum, precoNovo: amazonPrice, precoAnterior: row.preco_amazon });
     if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee', rowNum: row.rowNum, precoNovo: shopeePrice, precoAnterior: row.preco_shopee });
     if (shopeeOfferLink)      sheetUpdates.push({ tipo: 'link_shopee', rowNum: row.rowNum, valor: shopeeOfferLink });
-
-    // --- Detecção de quedas ---
-    const deveResetar     = !!row.alerta_enviado_em && alertaMaisDeNDias(row.alerta_enviado_em, DIAS_RESET);
-    const baselineMl      = deveResetar ? (mlPrice     ?? row.preco_ml)     : (row.preco_ml_alertado     ?? row.preco_ml);
-    const baselineAmazon  = deveResetar ? (amazonPrice ?? row.preco_amazon) : (row.preco_amazon_alertado ?? row.preco_amazon);
-    const baselineShopee  = deveResetar ? (shopeePrice ?? row.preco_shopee) : (row.preco_shopee_alertado ?? row.preco_shopee);
-
-    const quedaMl     = mlPrice     !== null && baselineMl     && mlPrice     < baselineMl     && calcDesconto(baselineMl,     mlPrice)     >= QUEDA_MIN_PCT;
-    const quedaAmazon = (amazonPrice !== null && baselineAmazon && amazonPrice < baselineAmazon && calcDesconto(baselineAmazon, amazonPrice) >= QUEDA_MIN_PCT)
-                     || (amazonPrice === null && row.preco_amazon && row.preco_amazon_anterior && row.preco_amazon < row.preco_amazon_anterior && calcDesconto(row.preco_amazon_anterior, row.preco_amazon) >= QUEDA_MIN_PCT);
-    const quedaShopee = (shopeePrice !== null && baselineShopee && shopeePrice < baselineShopee && calcDesconto(baselineShopee, shopeePrice) >= QUEDA_MIN_PCT)
-                     || (shopeePrice === null && row.preco_shopee && row.preco_shopee_anterior && row.preco_shopee < row.preco_shopee_anterior && calcDesconto(row.preco_shopee_anterior, row.preco_shopee) >= QUEDA_MIN_PCT);
-    const temQueda = quedaMl || quedaAmazon || quedaShopee;
-
-    // --- Detecção de cupom novo (comparando com planilha) ---
-    const cupomMlNovo     = !!mlCupom     && row.cupom_ml     !== 'Sim';
-    const cupomAmazonNovo = !!amazonCupom && row.cupom_amazon !== 'Sim';
-    const temCupomNovo = row.alerta_enviado_em && (cupomMlNovo || cupomAmazonNovo);
     sheetUpdates.push({ tipo: 'cupom_ml',     rowNum: row.rowNum, valor: mlCupom     ? 'Sim' : 'Não' });
     sheetUpdates.push({ tipo: 'cupom_amazon', rowNum: row.rowNum, valor: amazonCupom ? 'Sim' : 'Não' });
+
+    // --- Detecção de quedas ---
+    const baselineMl     = row.preco_ml_anterior      ?? row.preco_ml;
+    const baselineAmazon = row.preco_amazon_anterior   ?? row.preco_amazon;
+    const baselineShopee = row.preco_shopee_anterior   ?? row.preco_shopee;
+
+    const quedaMl     = mlPrice     !== null && baselineMl     && mlPrice     < baselineMl     && calcDesconto(baselineMl,     mlPrice)     >= QUEDA_MIN_PCT;
+    const quedaAmazon = amazonPrice !== null && baselineAmazon && amazonPrice < baselineAmazon && calcDesconto(baselineAmazon, amazonPrice) >= QUEDA_MIN_PCT;
+    const quedaShopee = shopeePrice !== null && baselineShopee && shopeePrice < baselineShopee && calcDesconto(baselineShopee, shopeePrice) >= QUEDA_MIN_PCT;
+    const temQueda = quedaMl || quedaAmazon || quedaShopee;
 
     const alertaBase = {
       rowNum:     row.rowNum,
@@ -769,22 +742,16 @@ async function rodarChecagem(whatsappClient) {
       } : null,
       amazon: (amazonPrice !== null || row.preco_amazon) ? {
         precoNovo:     amazonPrice ?? row.preco_amazon,
-        precoAnterior: amazonPrice !== null ? baselineAmazon : row.preco_amazon_anterior,
-        desconto:      quedaAmazon ? calcDesconto(
-                         amazonPrice !== null ? baselineAmazon : row.preco_amazon_anterior,
-                         amazonPrice ?? row.preco_amazon
-                       ) : null,
+        precoAnterior: baselineAmazon,
+        desconto:      quedaAmazon ? calcDesconto(baselineAmazon, amazonPrice) : null,
         url:           row.link_amazon,
         dropped:       quedaAmazon,
         cupom:         amazonCupom,
       } : null,
       shopee: (shopeePrice !== null || row.preco_shopee) ? {
         precoNovo:     shopeePrice ?? row.preco_shopee,
-        precoAnterior: shopeePrice !== null ? baselineShopee : row.preco_shopee_anterior,
-        desconto:      quedaShopee ? calcDesconto(
-                         shopeePrice !== null ? baselineShopee : row.preco_shopee_anterior,
-                         shopeePrice ?? row.preco_shopee
-                       ) : null,
+        precoAnterior: baselineShopee,
+        desconto:      quedaShopee ? calcDesconto(baselineShopee, shopeePrice) : null,
         url:           shopeeOfferLink ?? row.link_shopee,
         dropped:       quedaShopee,
         manual:        shopeePrice === null,
@@ -792,34 +759,39 @@ async function rodarChecagem(whatsappClient) {
       } : null,
     };
 
+    // --- Histórico ---
+    if (mlPrice !== null || amazonPrice !== null || shopeePrice !== null) {
+      historicoRegistros.push({
+        timestamp:    new Date().toISOString(),
+        nome:         row.nome,
+        preco_ml:     mlPrice     ?? null,
+        preco_amazon: amazonPrice ?? null,
+        preco_shopee: shopeePrice ?? null,
+      });
+    }
+
     // --- Gatilho + envio imediato ---
     if (!row.alerta_enviado_em) {
       console.log(`🆕 ${row.nome} — novo produto`);
       await enviarAlerta({ ...alertaBase, tipo: 'novo' });
-      if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
-      if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
-      if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee_alertado', rowNum: row.rowNum, precoNovo: shopeePrice });
     } else if (temQueda) {
-      if (quedaMl)                             console.log(`🔥 ${row.nome} — ML: R$ ${baselineMl} → R$ ${mlPrice} (-${calcDesconto(baselineMl, mlPrice)}%)`);
-      if (quedaAmazon && amazonPrice !== null) console.log(`🔥 ${row.nome} — Amazon: R$ ${baselineAmazon} → R$ ${amazonPrice} (-${calcDesconto(baselineAmazon, amazonPrice)}%)`);
-      if (quedaShopee && shopeePrice !== null) console.log(`🔥 ${row.nome} — Shopee: R$ ${baselineShopee} → R$ ${shopeePrice} (-${calcDesconto(baselineShopee, shopeePrice)}%)`);
+      if (quedaMl)     console.log(`🔥 ${row.nome} — ML: R$ ${baselineMl} → R$ ${mlPrice} (-${calcDesconto(baselineMl, mlPrice)}%)`);
+      if (quedaAmazon) console.log(`🔥 ${row.nome} — Amazon: R$ ${baselineAmazon} → R$ ${amazonPrice} (-${calcDesconto(baselineAmazon, amazonPrice)}%)`);
+      if (quedaShopee) console.log(`🔥 ${row.nome} — Shopee: R$ ${baselineShopee} → R$ ${shopeePrice} (-${calcDesconto(baselineShopee, shopeePrice)}%)`);
       await enviarAlerta({ ...alertaBase, tipo: 'queda' });
-      if (quedaMl)                             sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
-      if (quedaAmazon && amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
-      if (quedaShopee && shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee_alertado', rowNum: row.rowNum, precoNovo: shopeePrice });
-    } else if (deveResetar) {
-      if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
-      if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
-      if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee_alertado', rowNum: row.rowNum, precoNovo: shopeePrice });
-      console.log(`🔄 ${row.nome} — baseline resetada (${DIAS_RESET}+ dias desde o último alerta)`);
     } else {
       const partes = [
-        mlPrice     !== null ? `ML: R$ ${mlPrice} (baseline R$ ${baselineMl})`         : null,
-        amazonPrice !== null ? `Amazon: R$ ${amazonPrice} (baseline R$ ${baselineAmazon})` : null,
-        shopeePrice !== null ? `Shopee: R$ ${shopeePrice} (baseline R$ ${baselineShopee})` : null,
+        mlPrice     !== null ? `ML: R$ ${mlPrice} (ant R$ ${baselineMl})`         : null,
+        amazonPrice !== null ? `Amazon: R$ ${amazonPrice} (ant R$ ${baselineAmazon})` : null,
+        shopeePrice !== null ? `Shopee: R$ ${shopeePrice} (ant R$ ${baselineShopee})` : null,
       ].filter(Boolean).join(' | ') || 'sem scraping';
       console.log(`✅ ${row.nome} — ${partes}, sem queda`);
     }
+  }
+
+  if (historicoRegistros.length > 0) {
+    salvarHistorico(historicoRegistros);
+    console.log(`📦 Histórico: ${historicoRegistros.length} registro(s) gravados no SQLite.`);
   }
 
   if (sheetUpdates.length > 0 || statusUpdates.length > 0 || (rowNumsAlertados.length > 0 && alertaEnviadoEmCol)) {
