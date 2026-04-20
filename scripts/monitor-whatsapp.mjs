@@ -102,6 +102,8 @@ async function getSheetRows() {
   const precoAmazonAlertadoCol = findCol('preco_amazon_alertado');
   const precoShopeeAlertadoCol = findCol('preco_shopee_alertado');
   const linkShopeeCol          = findCol('link_shopee');
+  const cupomMlCol             = findCol('cupom_ml');
+  const cupomAmazonCol         = findCol('cupom_amazon');
 
   const rows = [];
   data.table.rows.forEach((row, gvizIndex) => {
@@ -136,6 +138,8 @@ async function getSheetRows() {
       miya_group:            get('miya_group')            ? String(get('miya_group')).toLowerCase().trim() : undefined,
       preco_ml_alertado:     get('preco_ml_alertado')     != null ? Number(get('preco_ml_alertado'))     : undefined,
       preco_amazon_alertado: get('preco_amazon_alertado') != null ? Number(get('preco_amazon_alertado')) : undefined,
+      cupom_ml:     get('cupom_ml')     ? String(get('cupom_ml'))     : undefined,
+      cupom_amazon: get('cupom_amazon') ? String(get('cupom_amazon')) : undefined,
     });
   });
 
@@ -148,6 +152,7 @@ async function getSheetRows() {
     statusMlCol, statusAmazonCol, statusShopeeCol,
     precoMlAlertadoCol, precoAmazonAlertadoCol, precoShopeeAlertadoCol,
     linkShopeeCol,
+    cupomMlCol, cupomAmazonCol,
   };
 }
 
@@ -219,6 +224,10 @@ async function updateSheetPrices(accessToken, updates, colMap) {
       push(colMap.precoShopeeAlertadoCol, u.rowNum, u.precoNovo);
     } else if (u.tipo === 'link_shopee') {
       push(colMap.linkShopeeCol, u.rowNum, u.valor);
+    } else if (u.tipo === 'cupom_ml') {
+      push(colMap.cupomMlCol, u.rowNum, u.valor);
+    } else if (u.tipo === 'cupom_amazon') {
+      push(colMap.cupomAmazonCol, u.rowNum, u.valor);
     }
   }
   if (data.length > 0) await batchUpdateSheet(accessToken, data);
@@ -615,6 +624,7 @@ function buildMsg(a) {
 
   if (a.tipo === 'novo')   msg += `🆕 Novo produto!\n\n`;
   if (a.tipo === 'queda')  msg += `🔥 Queda de preço!\n\n`;
+  if (a.tipo === 'cupom')  msg += `🏷️ Cupom disponível!\n\n`;
 
   const partes = [
     buildPlataformaMsg('Mercado Livre', a.ml),
@@ -639,15 +649,16 @@ async function rodarChecagem(whatsappClient) {
     statusMlCol, statusAmazonCol, statusShopeeCol,
     precoMlAlertadoCol, precoAmazonAlertadoCol, precoShopeeAlertadoCol,
     linkShopeeCol,
+    cupomMlCol, cupomAmazonCol,
   } = await getSheetRows();
   console.log(`Produtos encontrados: ${rows.length}`);
 
-  const colMap = { precoMlCol, precoMlAntCol, precoAmazonCol, precoAmazonAntCol, precoShopeeCol, precoShopeeAntCol, precoMlAlertadoCol, precoAmazonAlertadoCol, precoShopeeAlertadoCol, linkShopeeCol };
+  const colMap = { precoMlCol, precoMlAntCol, precoAmazonCol, precoAmazonAntCol, precoShopeeCol, precoShopeeAntCol, precoMlAlertadoCol, precoAmazonAlertadoCol, precoShopeeAlertadoCol, linkShopeeCol, cupomMlCol, cupomAmazonCol };
   const sheetUpdates = [];
   const statusUpdates = [];
   const rowNumsAlertados = [];
   const QUEDA_MIN_PCT = 5;
-  const DIAS_RESET    = 3;
+  const DIAS_RESET    = 1;
   const calcDesconto  = (ant, novo) => Math.round(((ant - novo) / ant) * 100);
 
   const enviarAlerta = async (alerta) => {
@@ -736,6 +747,13 @@ async function rodarChecagem(whatsappClient) {
                      || (shopeePrice === null && row.preco_shopee && row.preco_shopee_anterior && row.preco_shopee < row.preco_shopee_anterior && calcDesconto(row.preco_shopee_anterior, row.preco_shopee) >= QUEDA_MIN_PCT);
     const temQueda = quedaMl || quedaAmazon || quedaShopee;
 
+    // --- Detecção de cupom novo (comparando com planilha) ---
+    const cupomMlNovo     = !!mlCupom     && row.cupom_ml     !== 'Sim';
+    const cupomAmazonNovo = !!amazonCupom && row.cupom_amazon !== 'Sim';
+    const temCupomNovo = row.alerta_enviado_em && (cupomMlNovo || cupomAmazonNovo);
+    sheetUpdates.push({ tipo: 'cupom_ml',     rowNum: row.rowNum, valor: mlCupom     ? 'Sim' : 'Não' });
+    sheetUpdates.push({ tipo: 'cupom_amazon', rowNum: row.rowNum, valor: amazonCupom ? 'Sim' : 'Não' });
+
     const alertaBase = {
       rowNum:     row.rowNum,
       nome:       row.nome,
@@ -789,6 +807,10 @@ async function rodarChecagem(whatsappClient) {
       if (quedaMl)                             sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
       if (quedaAmazon && amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
       if (quedaShopee && shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee_alertado', rowNum: row.rowNum, precoNovo: shopeePrice });
+    } else if (temCupomNovo) {
+      const plats = [cupomMlNovo ? 'ML' : null, cupomAmazonNovo ? 'Amazon' : null].filter(Boolean).join(', ');
+      console.log(`🏷️ ${row.nome} — cupom novo em ${plats}`);
+      await enviarAlerta({ ...alertaBase, tipo: 'cupom' });
     } else if (deveResetar) {
       if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
       if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
