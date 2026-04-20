@@ -807,10 +807,6 @@ async function rodarChecagem(whatsappClient) {
       if (quedaMl)                             sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
       if (quedaAmazon && amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
       if (quedaShopee && shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee_alertado', rowNum: row.rowNum, precoNovo: shopeePrice });
-    } else if (temCupomNovo) {
-      const plats = [cupomMlNovo ? 'ML' : null, cupomAmazonNovo ? 'Amazon' : null].filter(Boolean).join(', ');
-      console.log(`🏷️ ${row.nome} — cupom novo em ${plats}`);
-      await enviarAlerta({ ...alertaBase, tipo: 'cupom' });
     } else if (deveResetar) {
       if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml_alertado',     rowNum: row.rowNum, precoNovo: mlPrice });
       if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon_alertado', rowNum: row.rowNum, precoNovo: amazonPrice });
