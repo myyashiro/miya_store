@@ -469,23 +469,23 @@ async function scrapeAmazonPrice(url) {
     // --- Cupom Amazon ---
     let cupom = null;
     const apliqueMatch = html.match(/Aplique o cup[oô]m de (\d+)%/i);
-    if (apliqueMatch) cupom = { pct: Number(apliqueMatch[1]), tipo: 'pct' };
+    if (apliqueMatch) cupom = { pct: Number(apliqueMatch[1]), tipo: 'pct', source: 'aplique-pct' };
 
     if (!cupom) {
       const badgeSection = html.match(/id="couponBadge[^"]*"[\s\S]{0,300}/);
-      if (badgeSection) { const m = badgeSection[0].match(/(\d+)%/); if (m) cupom = { pct: Number(m[1]), tipo: 'pct' }; }
+      if (badgeSection) { const m = badgeSection[0].match(/(\d+)%/); if (m) cupom = { pct: Number(m[1]), tipo: 'pct', source: 'couponBadge' }; }
     }
     if (!cupom) {
       const m = html.match(/"promotionPercent"\s*:\s*(\d+)/);
-      if (m) cupom = { pct: Number(m[1]), tipo: 'pct' };
+      if (m) cupom = { pct: Number(m[1]), tipo: 'pct', source: 'promotionPercent' };
     }
     if (!cupom) {
       const m = html.match(/cup[oô]m[^%\d]{0,60}(\d+)\s*%/i);
-      if (m) cupom = { pct: Number(m[1]), tipo: 'pct' };
+      if (m) cupom = { pct: Number(m[1]), tipo: 'pct', source: 'generic-pct' };
     }
     if (!cupom) {
       const m = html.match(/cup[oô]m[^R\d]{0,40}R\$\s*([\d.,]+)/i);
-      if (m) { const valor = Number(m[1].replace(/\./g, '').replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo' }; }
+      if (m) { const valor = Number(m[1].replace(/\./g, '').replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo', source: 'generic-fixo' }; }
     }
     if (!cupom) {
       const RESTRICOES = /primeira\s+compra|somente\s+no\s+app|v[aá]lido\s+somente\s+no\s+app|exclusivo\s+prime/i;
@@ -495,7 +495,7 @@ async function scrapeAmazonPrice(url) {
         const contexto = html.slice(Math.max(0, idx - 50), idx + 300);
         if (!RESTRICOES.test(contexto)) {
           const valor = Number(mCod[1].replace(/\./g, '').replace(',', '.'));
-          cupom = { valor, codigo: mCod[2], tipo: 'codigo' };
+          cupom = { valor, codigo: mCod[2], tipo: 'codigo', source: 'economize-codigo' };
         }
       }
     }
@@ -506,7 +506,7 @@ async function scrapeAmazonPrice(url) {
         ...[...html.matchAll(/Cupom de desconto ([A-Z0-9]{4,}) salvo em sua conta[\s\S]{0,500}?navigate:psp/g)].map(m => m[1]),
       ];
       const codigo = candidatos.find(cod => !codigoRestrito(cod));
-      if (codigo) cupom = { codigo, tipo: 'codigo' };
+      if (codigo) cupom = { codigo, tipo: 'codigo', source: 'codigo-conta' };
     }
 
     return { price, debug, cupom };
@@ -735,6 +735,8 @@ async function rodarChecagem(whatsappClient) {
     if (shopeeOfferLink)      sheetUpdates.push({ tipo: 'link_shopee', rowNum: row.rowNum, valor: shopeeOfferLink });
     const cupomMlKey     = cupomKey(mlCupom);
     const cupomAmazonKey = cupomKey(amazonCupom);
+    if (mlCupom)     console.log(`  🏷️ cupom ML detectado: ${cupomMlKey} (source: ${mlCupom.source})`);
+    if (amazonCupom) console.log(`  🏷️ cupom Amazon detectado: ${cupomAmazonKey} (source: ${amazonCupom.source})`);
     sheetUpdates.push({ tipo: 'cupom_ml',     rowNum: row.rowNum, valor: cupomMlKey });
     sheetUpdates.push({ tipo: 'cupom_amazon', rowNum: row.rowNum, valor: cupomAmazonKey });
 
