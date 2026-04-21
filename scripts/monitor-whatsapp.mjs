@@ -564,6 +564,14 @@ function formatMoeda(valor) {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function cupomKey(cupom) {
+  if (!cupom) return '';
+  if (cupom.tipo === 'pct')    return `pct:${cupom.pct}`;
+  if (cupom.tipo === 'fixo')   return `fixo:${cupom.valor}`;
+  if (cupom.tipo === 'codigo') return `codigo:${cupom.codigo}`;
+  return '';
+}
+
 function parseAlertaEnviadoEm(str) {
   if (!str) return null;
   const s = str.replace(/^'/, '').trim();
@@ -612,6 +620,7 @@ function buildMsg(a) {
   if (a.tipo === 'novo')     msg += `🆕 Novo produto!\n\n`;
   if (a.tipo === 'queda')    msg += `🔥 Queda de preço!\n\n`;
   if (a.tipo === 'lembrete') msg += `📌 Oferta do dia\n\n`;
+  if (a.tipo === 'cupom')    msg += `🏷️ Cupom disponível!\n\n`;
 
   const partes = [
     buildPlataformaMsg('Mercado Livre', a.ml),
@@ -727,8 +736,13 @@ async function rodarChecagem(whatsappClient) {
     if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon', rowNum: row.rowNum, precoNovo: amazonPrice, precoAnterior: row.preco_amazon });
     if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee', rowNum: row.rowNum, precoNovo: shopeePrice, precoAnterior: row.preco_shopee });
     if (shopeeOfferLink)      sheetUpdates.push({ tipo: 'link_shopee', rowNum: row.rowNum, valor: shopeeOfferLink });
-    sheetUpdates.push({ tipo: 'cupom_ml',     rowNum: row.rowNum, valor: mlCupom     ? 'Sim' : 'Não' });
-    sheetUpdates.push({ tipo: 'cupom_amazon', rowNum: row.rowNum, valor: amazonCupom ? 'Sim' : 'Não' });
+    const cupomMlKey     = cupomKey(mlCupom);
+    const cupomAmazonKey = cupomKey(amazonCupom);
+    sheetUpdates.push({ tipo: 'cupom_ml',     rowNum: row.rowNum, valor: cupomMlKey });
+    sheetUpdates.push({ tipo: 'cupom_amazon', rowNum: row.rowNum, valor: cupomAmazonKey });
+
+    const temCupomNovo = (cupomMlKey     && cupomMlKey     !== (row.cupom_ml     ?? ''))
+                      || (cupomAmazonKey && cupomAmazonKey !== (row.cupom_amazon ?? ''));
 
     // --- Detecção de quedas ---
     const baselineMl     = row.preco_ml;
@@ -792,6 +806,9 @@ async function rodarChecagem(whatsappClient) {
       if (quedaAmazon) console.log(`🔥 ${row.nome} — Amazon: R$ ${baselineAmazon} → R$ ${amazonPrice} (-${calcDesconto(baselineAmazon, amazonPrice)}%)`);
       if (quedaShopee) console.log(`🔥 ${row.nome} — Shopee: R$ ${baselineShopee} → R$ ${shopeePrice} (-${calcDesconto(baselineShopee, shopeePrice)}%)`);
       await enviarAlerta({ ...alertaBase, tipo: 'queda' });
+    } else if (temCupomNovo) {
+      console.log(`🏷️ ${row.nome} — cupom novo detectado`);
+      await enviarAlerta({ ...alertaBase, tipo: 'cupom' });
     } else {
       const partes = [
         mlPrice     !== null ? `ML: R$ ${mlPrice} (ant R$ ${baselineMl})`         : null,
