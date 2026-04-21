@@ -718,9 +718,9 @@ async function rodarChecagem(whatsappClient) {
     sheetUpdates.push({ tipo: 'cupom_amazon', rowNum: row.rowNum, valor: amazonCupom ? 'Sim' : 'Não' });
 
     // --- Detecção de quedas ---
-    const baselineMl     = row.preco_ml_anterior      ?? row.preco_ml;
-    const baselineAmazon = row.preco_amazon_anterior   ?? row.preco_amazon;
-    const baselineShopee = row.preco_shopee_anterior   ?? row.preco_shopee;
+    const baselineMl     = row.preco_ml;
+    const baselineAmazon = row.preco_amazon;
+    const baselineShopee = row.preco_shopee;
 
     const quedaMl     = mlPrice     !== null && baselineMl     && mlPrice     < baselineMl     && calcDesconto(baselineMl,     mlPrice)     >= QUEDA_MIN_PCT;
     const quedaAmazon = amazonPrice !== null && baselineAmazon && amazonPrice < baselineAmazon && calcDesconto(baselineAmazon, amazonPrice) >= QUEDA_MIN_PCT;
