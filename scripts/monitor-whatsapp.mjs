@@ -564,6 +564,16 @@ function formatMoeda(valor) {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function parseAlertaEnviadoEm(str) {
+  if (!str) return null;
+  const s = str.replace(/^'/, '').trim();
+  const [datePart, timePart] = s.split(' ');
+  if (!datePart) return null;
+  const [d, m, y] = datePart.split('/');
+  if (!d || !m || !y) return null;
+  return new Date(`${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T${timePart ?? '00:00'}:00`);
+}
+
 // --- Monitor ---
 
 function buildPlataformaMsg(label, p) {
@@ -599,8 +609,9 @@ function buildPlataformaMsg(label, p) {
 function buildMsg(a) {
   let msg = `${a.nome}\n\n`;
 
-  if (a.tipo === 'novo')  msg += `🆕 Novo produto!\n\n`;
-  if (a.tipo === 'queda') msg += `🔥 Queda de preço!\n\n`;
+  if (a.tipo === 'novo')     msg += `🆕 Novo produto!\n\n`;
+  if (a.tipo === 'queda')    msg += `🔥 Queda de preço!\n\n`;
+  if (a.tipo === 'lembrete') msg += `📌 Oferta do dia\n\n`;
 
   const partes = [
     buildPlataformaMsg('Mercado Livre', a.ml),
@@ -639,7 +650,9 @@ async function rodarChecagem(whatsappClient) {
   const statusUpdates = [];
   const rowNumsAlertados = [];
   const historicoRegistros = [];
+  const lembretes = [];
   const QUEDA_MIN_PCT = 5;
+  const DIAS_LEMBRETE  = 7;
   const calcDesconto  = (ant, novo) => Math.round(((ant - novo) / ant) * 100);
 
   const enviarAlerta = async (alerta) => {
@@ -786,7 +799,26 @@ async function rodarChecagem(whatsappClient) {
         shopeePrice !== null ? `Shopee: R$ ${shopeePrice} (ant R$ ${baselineShopee})` : null,
       ].filter(Boolean).join(' | ') || 'sem scraping';
       console.log(`✅ ${row.nome} — ${partes}, sem queda`);
+
+      // Candidato a lembrete se não recebeu alerta há DIAS_LEMBRETE dias ou mais
+      const dtEnviado = parseAlertaEnviadoEm(row.alerta_enviado_em);
+      if (dtEnviado && (Date.now() - dtEnviado.getTime()) / 86400000 >= DIAS_LEMBRETE) {
+        lembretes.push({ ...alertaBase, dtEnviado });
+      }
     }
+  }
+
+  // --- Lembretes: 1 por grupo por checagem (o produto com alerta mais antigo) ---
+  const lembretesFiltrados = lembretes.filter(l => !rowNumsAlertados.includes(l.rowNum));
+  const lembretePorGrupo = new Map();
+  for (const l of lembretesFiltrados) {
+    const grupo = (l.miya_group ?? '').toLowerCase();
+    const atual = lembretePorGrupo.get(grupo);
+    if (!atual || l.dtEnviado < atual.dtEnviado) lembretePorGrupo.set(grupo, l);
+  }
+  for (const lembrete of lembretePorGrupo.values()) {
+    console.log(`🔔 Lembrete: ${lembrete.nome} (grupo: ${lembrete.miya_group ?? 'padrão'})`);
+    await enviarAlerta({ ...lembrete, tipo: 'lembrete' });
   }
 
   if (historicoRegistros.length > 0) {
