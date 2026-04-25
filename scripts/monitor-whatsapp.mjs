@@ -806,8 +806,8 @@ async function rodarChecagem(whatsappClient) {
       if (quedaShopee) console.log(`🔥 ${row.nome} — Shopee: R$ ${baselineShopee} → R$ ${shopeePrice} (-${calcDesconto(baselineShopee, shopeePrice)}%)`);
       await enviarAlerta({ ...alertaBase, tipo: 'queda' });
     } else if (temCupomNovo) {
-      console.log(`🏷️ ${row.nome} — cupom novo detectado`);
-      await enviarAlerta({ ...alertaBase, tipo: 'cupom' });
+      console.log(`🏷️ ${row.nome} — cupom novo detectado (alerta desativado)`);
+      // alerta de cupom desativado — detecta e salva na planilha, mas não envia WhatsApp
     } else {
       const partes = [
         mlPrice     !== null ? `ML: R$ ${mlPrice} (ant R$ ${baselineMl})`         : null,
