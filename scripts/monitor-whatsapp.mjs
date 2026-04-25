@@ -73,7 +73,7 @@ function salvarHistorico(registros) {
 }
 
 // Horários fixos de checagem (horas inteiras)
-const HORARIOS_CHECAGEM = [8, 10, 12, 14, 16, 18, 20, 22];
+const HORARIOS_CHECAGEM = [8, 10, 12, 14, 16, 18, 20];
 
 function proximoHorario() {
   const agora = new Date();
