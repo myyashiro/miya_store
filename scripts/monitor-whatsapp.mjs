@@ -61,6 +61,26 @@ db.run(`
   )
 `);
 
+function getMinimosHistorico(nome, diasAtras) {
+  const cutoff = new Date(Date.now() - diasAtras * 24 * 60 * 60 * 1000).toISOString();
+  const stmt = db.prepare(
+    `SELECT MIN(preco_ml) AS min_ml, MIN(preco_amazon) AS min_amazon, MIN(preco_shopee) AS min_shopee
+     FROM historico WHERE nome = ? AND timestamp >= ?`
+  );
+  stmt.bind([nome, cutoff]);
+  const found = stmt.step();
+  const r = found ? stmt.getAsObject() : {};
+  stmt.free();
+  return {
+    min_ml:     r.min_ml     ?? null,
+    min_amazon: r.min_amazon ?? null,
+    min_shopee: r.min_shopee ?? null,
+  };
+}
+
+const getMinimoPrecosUltimas24h  = (nome) => getMinimosHistorico(nome, 1);
+const getMinimoPrecosUltimos15d  = (nome) => getMinimosHistorico(nome, 15);
+
 function salvarHistorico(registros) {
   const stmt = db.prepare(
     'INSERT INTO historico (timestamp, nome, preco_ml, preco_amazon, preco_shopee) VALUES (?, ?, ?, ?, ?)'
@@ -614,8 +634,9 @@ function buildPlataformaMsg(label, p) {
 function buildMsg(a) {
   let msg = `${a.nome}\n\n`;
 
-  if (a.tipo === 'novo')     msg += `🆕 Novo produto!\n\n`;
+  if (a.tipo === 'novo')      msg += `🆕 Novo produto!\n\n`;
   if (a.tipo === 'queda')    msg += `🔥 Queda de preço!\n\n`;
+  if (a.tipo === 'minimo15d') msg += `📉 Menor preço dos últimos 15 dias!\n\n`;
   if (a.tipo === 'lembrete') msg += `📌 Oferta do dia\n\n`;
   if (a.tipo === 'cupom')    msg += `🏷️ Cupom disponível!\n\n`;
 
@@ -729,9 +750,12 @@ async function rodarChecagem(whatsappClient) {
     }
 
     // --- Atualizações de planilha ---
-    if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml',     rowNum: row.rowNum, precoNovo: mlPrice,     precoAnterior: row.preco_ml });
-    if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon', rowNum: row.rowNum, precoNovo: amazonPrice, precoAnterior: row.preco_amazon });
-    if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee', rowNum: row.rowNum, precoNovo: shopeePrice, precoAnterior: row.preco_shopee });
+    const min24h = getMinimoPrecosUltimas24h(row.nome);
+    const min15d = getMinimoPrecosUltimos15d(row.nome);
+
+    if (mlPrice     !== null) sheetUpdates.push({ tipo: 'ml',     rowNum: row.rowNum, precoNovo: mlPrice,     precoAnterior: min24h.min_ml     ?? row.preco_ml });
+    if (amazonPrice !== null) sheetUpdates.push({ tipo: 'amazon', rowNum: row.rowNum, precoNovo: amazonPrice, precoAnterior: min24h.min_amazon ?? row.preco_amazon });
+    if (shopeePrice !== null) sheetUpdates.push({ tipo: 'shopee', rowNum: row.rowNum, precoNovo: shopeePrice, precoAnterior: min24h.min_shopee ?? row.preco_shopee });
     if (shopeeOfferLink)      sheetUpdates.push({ tipo: 'link_shopee', rowNum: row.rowNum, valor: shopeeOfferLink });
     const cupomMlKey     = cupomKey(mlCupom);
     const cupomAmazonKey = cupomKey(amazonCupom);
@@ -744,14 +768,19 @@ async function rodarChecagem(whatsappClient) {
                       || (cupomAmazonKey && cupomAmazonKey !== (row.cupom_amazon ?? ''));
 
     // --- Detecção de quedas ---
-    const baselineMl     = row.preco_ml;
-    const baselineAmazon = row.preco_amazon;
-    const baselineShopee = row.preco_shopee;
+    const baselineMl     = min24h.min_ml     ?? row.preco_ml;
+    const baselineAmazon = min24h.min_amazon ?? row.preco_amazon;
+    const baselineShopee = min24h.min_shopee ?? row.preco_shopee;
 
     const quedaMl     = mlPrice     !== null && baselineMl     && mlPrice     < baselineMl     && calcDesconto(baselineMl,     mlPrice)     >= QUEDA_MIN_PCT;
     const quedaAmazon = amazonPrice !== null && baselineAmazon && amazonPrice < baselineAmazon && calcDesconto(baselineAmazon, amazonPrice) >= QUEDA_MIN_PCT;
     const quedaShopee = shopeePrice !== null && baselineShopee && shopeePrice < baselineShopee && calcDesconto(baselineShopee, shopeePrice) >= QUEDA_MIN_PCT;
     const temQueda = quedaMl || quedaAmazon || quedaShopee;
+
+    const minimo15dMl     = mlPrice     !== null && min15d.min_ml     !== null && mlPrice     < min15d.min_ml     && calcDesconto(min15d.min_ml,     mlPrice)     >= QUEDA_MIN_PCT;
+    const minimo15dAmazon = amazonPrice !== null && min15d.min_amazon !== null && amazonPrice < min15d.min_amazon && calcDesconto(min15d.min_amazon, amazonPrice) >= QUEDA_MIN_PCT;
+    const minimo15dShopee = shopeePrice !== null && min15d.min_shopee !== null && shopeePrice < min15d.min_shopee && calcDesconto(min15d.min_shopee, shopeePrice) >= QUEDA_MIN_PCT;
+    const temMinimo15d = minimo15dMl || minimo15dAmazon || minimo15dShopee;
 
     const alertaBase = {
       rowNum:     row.rowNum,
@@ -800,6 +829,17 @@ async function rodarChecagem(whatsappClient) {
     if (!row.alerta_enviado_em) {
       console.log(`🆕 ${row.nome} — novo produto`);
       await enviarAlerta({ ...alertaBase, tipo: 'novo' });
+    } else if (temMinimo15d) {
+      if (minimo15dMl)     console.log(`📉 ${row.nome} — ML: mínimo 15d R$ ${min15d.min_ml} → R$ ${mlPrice} (-${calcDesconto(min15d.min_ml, mlPrice)}%)`);
+      if (minimo15dAmazon) console.log(`📉 ${row.nome} — Amazon: mínimo 15d R$ ${min15d.min_amazon} → R$ ${amazonPrice} (-${calcDesconto(min15d.min_amazon, amazonPrice)}%)`);
+      if (minimo15dShopee) console.log(`📉 ${row.nome} — Shopee: mínimo 15d R$ ${min15d.min_shopee} → R$ ${shopeePrice} (-${calcDesconto(min15d.min_shopee, shopeePrice)}%)`);
+      const alertaMinimo15d = {
+        ...alertaBase,
+        ml:     alertaBase.ml     ? { ...alertaBase.ml,     precoAnterior: min15d.min_ml     ?? baselineMl,     desconto: minimo15dMl     ? calcDesconto(min15d.min_ml,     mlPrice)     : alertaBase.ml.desconto,     dropped: minimo15dMl     } : null,
+        amazon: alertaBase.amazon ? { ...alertaBase.amazon, precoAnterior: min15d.min_amazon ?? baselineAmazon, desconto: minimo15dAmazon ? calcDesconto(min15d.min_amazon, amazonPrice) : alertaBase.amazon.desconto, dropped: minimo15dAmazon } : null,
+        shopee: alertaBase.shopee ? { ...alertaBase.shopee, precoAnterior: min15d.min_shopee ?? baselineShopee, desconto: minimo15dShopee ? calcDesconto(min15d.min_shopee, shopeePrice) : alertaBase.shopee.desconto, dropped: minimo15dShopee } : null,
+      };
+      await enviarAlerta({ ...alertaMinimo15d, tipo: 'minimo15d' });
     } else if (temQueda) {
       if (quedaMl)     console.log(`🔥 ${row.nome} — ML: R$ ${baselineMl} → R$ ${mlPrice} (-${calcDesconto(baselineMl, mlPrice)}%)`);
       if (quedaAmazon) console.log(`🔥 ${row.nome} — Amazon: R$ ${baselineAmazon} → R$ ${amazonPrice} (-${calcDesconto(baselineAmazon, amazonPrice)}%)`);
