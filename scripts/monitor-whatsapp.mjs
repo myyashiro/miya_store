@@ -568,8 +568,15 @@ async function scrapeAmazonPrice(url) {
       if (m) cupom = { pct: Number(m[1]), tipo: 'pct', source: 'generic-pct' };
     }
     if (!cupom) {
-      const m = html.match(/cup[oô]m[^R\d]{0,40}R\$\s*([\d.,]+)/i);
-      if (m) { const valor = Number(m[1].replace(/\./g, '').replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo', source: 'generic-fixo' }; }
+      // Restringe busca de cupom fixo às seções de cupom conhecidas da Amazon para evitar falsos positivos
+      const couponSection =
+        html.match(/id="couponBadge[^"]*"[\s\S]{0,1500}/) ??
+        html.match(/id="green-badge[^"]*"[\s\S]{0,800}/) ??
+        html.match(/id="(?:apex_offerDisplay|corePriceDisplay)[^"]*"[\s\S]{0,3000}/);
+      if (couponSection) {
+        const m = couponSection[0].match(/cup[oô]m[^R\d]{0,40}R\$\s*([\d.,]+)/i);
+        if (m) { const valor = Number(m[1].replace(/\./g, '').replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo', source: 'generic-fixo' }; }
+      }
     }
     if (!cupom) {
       const RESTRICOES = /primeira\s+compra|somente\s+no\s+app|v[aá]lido\s+somente\s+no\s+app|exclusivo\s+prime/i;
