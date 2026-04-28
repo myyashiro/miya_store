@@ -288,15 +288,18 @@ function fetchWithTimeout(url, options = {}, ms = 15000) {
 
 let _mlBrowser = null;
 async function getMLBrowser() {
-  if (!_mlBrowser || !_mlBrowser.connected) {
+  if (!_mlBrowser) {
     _mlBrowser = await puppeteerExtra.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
+    _mlBrowser.on('disconnected', () => { _mlBrowser = null; });
   }
   return _mlBrowser;
 }
-process.on('exit', () => { _mlBrowser?.close(); });
+for (const sig of ['exit', 'SIGINT', 'SIGTERM']) {
+  process.on(sig, () => { _mlBrowser?.close(); });
+}
 
 async function scrapePrice(url) {
   try {
