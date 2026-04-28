@@ -150,6 +150,9 @@ async function getSheetRows() {
   const statusAmazonCol   = findCol('status_amazon');
   const statusShopeeCol   = findCol('status_shopee');
   const linkShopeeCol     = findCol('link_shopee');
+  const cupomMlCol        = findCol('cupom_ml');
+  const cupomAmazonCol    = findCol('cupom_amazon');
+  const cupomShopeeCol    = findCol('cupom_shopee');
   const rows = [];
   data.table.rows.forEach((row, gvizIndex) => {
     const cells = row.c || [];
@@ -188,6 +191,7 @@ async function getSheetRows() {
     alertaEnviadoEmCol,
     statusMlCol, statusAmazonCol, statusShopeeCol,
     linkShopeeCol,
+    cupomMlCol, cupomAmazonCol, cupomShopeeCol,
   };
 }
 
@@ -726,6 +730,7 @@ async function rodarChecagem(whatsappClient) {
     alertaEnviadoEmCol,
     statusMlCol, statusAmazonCol, statusShopeeCol,
     linkShopeeCol,
+    cupomMlCol, cupomAmazonCol, cupomShopeeCol,
   } = await getSheetRows();
   console.log(`Produtos encontrados: ${rows.length}`);
 
@@ -734,6 +739,7 @@ async function rodarChecagem(whatsappClient) {
     precoAmazonCol, precoAmazonAntCol,
     precoShopeeCol, precoShopeeAntCol,
     linkShopeeCol,
+    cupomMlCol, cupomAmazonCol, cupomShopeeCol,
   };
   const sheetUpdates = [];
   const statusUpdates = [];
@@ -804,6 +810,11 @@ async function rodarChecagem(whatsappClient) {
       const valor = shopeePrice !== null ? `OK ${agoraStatus}` : `erro: ${shopeeDebug} (${agoraStatus})`;
       statusUpdates.push({ range: `${SHEET_NAME}!${statusShopeeCol}${row.rowNum}`, values: [[valor]] });
     }
+
+    // Limpa cupom quando preço não foi encontrado (produto indisponível ou erro)
+    if (mlPrice     === null && row.link_ml_direto     && cupomMlCol)     statusUpdates.push({ range: `${SHEET_NAME}!${cupomMlCol}${row.rowNum}`,     values: [['']] });
+    if (amazonPrice === null && row.link_amazon        && cupomAmazonCol) statusUpdates.push({ range: `${SHEET_NAME}!${cupomAmazonCol}${row.rowNum}`, values: [['']] });
+    if (shopeePrice === null && row.link_shopee_direto && cupomShopeeCol) statusUpdates.push({ range: `${SHEET_NAME}!${cupomShopeeCol}${row.rowNum}`, values: [['']] });
 
     const temDadoUtil = mlPrice !== null || amazonPrice !== null || shopeePrice !== null || row.preco_shopee != null;
     if (!temDadoUtil) {
