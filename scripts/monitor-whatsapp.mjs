@@ -427,13 +427,29 @@ async function scrapePrice(url) {
         const minimo = mFixo[2] ? Number(mFixo[2].replace(',', '.')) : 0;
         if (valor > 0 && (!minimo || (price && price >= minimo))) cupom = { valor, tipo: 'fixo' };
       } else {
-        const mFixoSimples = html.match(/coupon-awareness-row-label[\s\S]{0,400}?aria-label="([\d,]+)\s*reais"/);
-        if (mFixoSimples?.[1]) { const valor = Number(mFixoSimples[1].replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo' }; }
+        const mFixoSimples = html.match(/coupon-awareness-row-label[\s\S]{0,800}/);
+        if (mFixoSimples) {
+          const ariaVal  = mFixoSimples[0].match(/aria-label="([\d,]+)\s*reais"/);
+          const minimoVal = mFixoSimples[0].match(/[Cc]ompra\s+m[íi]nima[\s\S]{0,200}?aria-label="([\d,]+)\s*reais"/);
+          if (ariaVal?.[1]) {
+            const valor  = Number(ariaVal[1].replace(',', '.'));
+            const minimo = minimoVal ? Number(minimoVal[1].replace(',', '.')) : 0;
+            if (valor > 0 && (!minimo || (price && price >= minimo))) cupom = { valor, tipo: 'fixo' };
+          }
+        }
       }
     }
     if (!cupom) {
       const m = html.match(/cup[oô]m[^R\d]{0,40}R\$\s*([\d.,]+)/i);
-      if (m) { const valor = Number(m[1].replace(/\./g, '').replace(',', '.')); if (valor > 0) cupom = { valor, tipo: 'fixo' }; }
+      if (m) {
+        const valor = Number(m[1].replace(/\./g, '').replace(',', '.'));
+        if (valor > 0) {
+          const ctx = html.slice(Math.max(0, m.index - 100), m.index + 500);
+          const minimoMatch = ctx.match(/[Cc]ompra\s+m[íi]nima[^R\d]{0,30}R\$\s*([\d.,]+)/);
+          const minimo = minimoMatch ? Number(minimoMatch[1].replace(/\./g, '').replace(',', '.')) : 0;
+          if (!minimo || (price && price >= minimo)) cupom = { valor, tipo: 'fixo' };
+        }
+      }
     }
 
     return { price, debug, cupom };
