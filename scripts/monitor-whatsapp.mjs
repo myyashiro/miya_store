@@ -796,6 +796,10 @@ async function rodarChecagem(whatsappClient) {
       : { price: null, debug: 'sem link', offerLink: null };
     if (row.link_shopee_direto) await sleep(2000);
 
+    // Log de cupons para diagnóstico
+    if (mlCupom)     console.log(`  🏷️ ML cupom: ${JSON.stringify(mlCupom)}`);
+    if (amazonCupom) console.log(`  🏷️ Amazon cupom: ${JSON.stringify(amazonCupom)}`);
+
     // --- Status por marketplace ---
     const agoraStatus = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
     if (statusMlCol && row.link_ml_direto) {
