@@ -308,10 +308,11 @@ async function scrapePrice(url) {
     let html;
     let ldJsonTexts = [];
     let domPrice = null;
+    let isUnavailableDom = false;
     try {
       await page.goto(cleanUrl, { waitUntil: 'networkidle2', timeout: 30000 });
       // Extrai ld+json e preço do DOM antes de serializar (evita problema com nonce="" no regex)
-      ({ ldJsonTexts, domPrice } = await page.evaluate(() => {
+      ({ ldJsonTexts, domPrice, isUnavailableDom } = await page.evaluate(() => {
         const ldJsonTexts = [...document.querySelectorAll('script[type="application/ld+json"]')].map(s => s.textContent);
         const frac = document.querySelector('.andes-money-amount__fraction');
         const cents = document.querySelector('.andes-money-amount__cents');
@@ -321,11 +322,33 @@ async function scrapePrice(url) {
           const centsVal = cents ? parseInt(cents.textContent.replace(/\D/g, ''), 10) : 0;
           domPrice = fracVal + centsVal / 100;
         }
-        return { ldJsonTexts, domPrice };
+        const buyboxText = (document.querySelector('.ui-pdp-buybox, [data-testid="buybox"]')?.innerText ?? '').toLowerCase();
+        const isUnavailableDom =
+          !!document.querySelector('[data-testid="buybox-unavailable"]') ||
+          !!document.querySelector('.ui-pdp-buybox__quantity--unavailable') ||
+          !!document.querySelector('.ui-pdp-error') ||
+          buyboxText.includes('indisponível') ||
+          buyboxText.includes('não disponível');
+        return { ldJsonTexts, domPrice, isUnavailableDom };
       }));
       html = await page.content();
     } finally {
       await page.close();
+    }
+
+    // --- Disponibilidade ---
+    const isUnavailableJsonLd = ldJsonTexts.some(text => {
+      try {
+        const json = JSON.parse(text);
+        const nodes = Array.isArray(json) ? json : [json];
+        return nodes.some(n => {
+          const avail = String(n?.offers?.availability ?? '');
+          return avail.includes('OutOfStock') || avail.includes('Discontinued') || avail.includes('SoldOut');
+        });
+      } catch { return false; }
+    });
+    if (isUnavailableJsonLd || isUnavailableDom) {
+      return { price: null, debug: 'produto indisponível', cupom: null };
     }
 
     // --- Preço ---
