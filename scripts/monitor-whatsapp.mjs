@@ -152,7 +152,6 @@ async function getSheetRows() {
   const linkShopeeCol     = findCol('link_shopee');
   const cupomMlCol        = findCol('cupom_ml');
   const cupomAmazonCol    = findCol('cupom_amazon');
-  const cupomShopeeCol    = findCol('cupom_shopee');
   const rows = [];
   data.table.rows.forEach((row, gvizIndex) => {
     const cells = row.c || [];
@@ -191,7 +190,7 @@ async function getSheetRows() {
     alertaEnviadoEmCol,
     statusMlCol, statusAmazonCol, statusShopeeCol,
     linkShopeeCol,
-    cupomMlCol, cupomAmazonCol, cupomShopeeCol,
+    cupomMlCol, cupomAmazonCol,
   };
 }
 
@@ -656,7 +655,6 @@ function formatMoeda(valor) {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-
 function parseAlertaEnviadoEm(str) {
   if (!str) return null;
   const s = str.replace(/^'/, '').trim();
@@ -706,7 +704,6 @@ function buildMsg(a) {
   if (a.tipo === 'queda')    msg += `🔥 Queda de preço!\n\n`;
   if (a.tipo === 'minimo15d') msg += `📉 Menor preço dos últimos 15 dias!\n\n`;
   if (a.tipo === 'lembrete') msg += `📌 Oferta do dia\n\n`;
-  if (a.tipo === 'cupom')    msg += `🏷️ Cupom disponível!\n\n`;
 
   const partes = [
     buildPlataformaMsg('Mercado Livre', a.ml),
@@ -730,7 +727,7 @@ async function rodarChecagem(whatsappClient) {
     alertaEnviadoEmCol,
     statusMlCol, statusAmazonCol, statusShopeeCol,
     linkShopeeCol,
-    cupomMlCol, cupomAmazonCol, cupomShopeeCol,
+    cupomMlCol, cupomAmazonCol,
   } = await getSheetRows();
   console.log(`Produtos encontrados: ${rows.length}`);
 
@@ -739,7 +736,6 @@ async function rodarChecagem(whatsappClient) {
     precoAmazonCol, precoAmazonAntCol,
     precoShopeeCol, precoShopeeAntCol,
     linkShopeeCol,
-    cupomMlCol, cupomAmazonCol, cupomShopeeCol,
   };
   const sheetUpdates = [];
   const statusUpdates = [];
@@ -816,9 +812,8 @@ async function rodarChecagem(whatsappClient) {
     }
 
     // Limpa cupom quando preço não foi encontrado (produto indisponível ou erro)
-    if (mlPrice     === null && row.link_ml_direto     && cupomMlCol)     statusUpdates.push({ range: `${SHEET_NAME}!${cupomMlCol}${row.rowNum}`,     values: [['']] });
-    if (amazonPrice === null && row.link_amazon        && cupomAmazonCol) statusUpdates.push({ range: `${SHEET_NAME}!${cupomAmazonCol}${row.rowNum}`, values: [['']] });
-    if (shopeePrice === null && row.link_shopee_direto && cupomShopeeCol) statusUpdates.push({ range: `${SHEET_NAME}!${cupomShopeeCol}${row.rowNum}`, values: [['']] });
+    if (mlPrice     === null && row.link_ml_direto && cupomMlCol)     statusUpdates.push({ range: `${SHEET_NAME}!${cupomMlCol}${row.rowNum}`,     values: [['']] });
+    if (amazonPrice === null && row.link_amazon    && cupomAmazonCol) statusUpdates.push({ range: `${SHEET_NAME}!${cupomAmazonCol}${row.rowNum}`, values: [['']] });
 
     const temDadoUtil = mlPrice !== null || amazonPrice !== null || shopeePrice !== null || row.preco_shopee != null;
     if (!temDadoUtil) {
