@@ -22,6 +22,9 @@ if (existsSync(envPath)) {
 const require = createRequire(import.meta.url);
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const QRCode                              = require('qrcode');
+const puppeteerExtra                      = require('puppeteer-extra');
+const StealthPlugin                       = require('puppeteer-extra-plugin-stealth');
+puppeteerExtra.use(StealthPlugin());
 
 const SHEET_ID      = process.env.SHEET_ID ?? process.env.NEXT_PUBLIC_SHEET_ID;
 const SHOPEE_APP_ID = process.env.SHOPEE_AFFILIATE_APP_ID;
@@ -283,6 +286,18 @@ function fetchWithTimeout(url, options = {}, ms = 15000) {
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
 }
 
+let _mlBrowser = null;
+async function getMLBrowser() {
+  if (!_mlBrowser || !_mlBrowser.connected) {
+    _mlBrowser = await puppeteerExtra.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+  }
+  return _mlBrowser;
+}
+process.on('exit', () => { _mlBrowser?.close(); });
+
 async function scrapePrice(url) {
   try {
     const parsed = new URL(url);
@@ -294,26 +309,40 @@ async function scrapePrice(url) {
     const cleanUrl = itemIdMatch
       ? `${parsed.origin}${parsed.pathname}?pdp_filters=item_id%3A${itemIdMatch[1]}`
       : `${parsed.origin}${parsed.pathname}`;
-    const res = await fetchWithTimeout(cleanUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'pt-BR,pt;q=0.9',
-      },
-      redirect: 'follow',
-    });
 
-    if (!res.ok) return { price: null, debug: `http ${res.status}`, cupom: null };
-    const html = await res.text();
+    const browser = await getMLBrowser();
+    const page = await browser.newPage();
+    let html;
+    let ldJsonTexts = [];
+    let domPrice = null;
+    try {
+      await page.goto(cleanUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+      // Extrai ld+json e preço do DOM antes de serializar (evita problema com nonce="" no regex)
+      ({ ldJsonTexts, domPrice } = await page.evaluate(() => {
+        const ldJsonTexts = [...document.querySelectorAll('script[type="application/ld+json"]')].map(s => s.textContent);
+        const frac = document.querySelector('.andes-money-amount__fraction');
+        const cents = document.querySelector('.andes-money-amount__cents');
+        let domPrice = null;
+        if (frac) {
+          const fracVal = parseInt(frac.textContent.replace(/\D/g, ''), 10);
+          const centsVal = cents ? parseInt(cents.textContent.replace(/\D/g, ''), 10) : 0;
+          domPrice = fracVal + centsVal / 100;
+        }
+        return { ldJsonTexts, domPrice };
+      }));
+      html = await page.content();
+    } finally {
+      await page.close();
+    }
 
     // --- Preço ---
     let price = null;
     let debug = `html ok mas preço não encontrado (${html.length} bytes)`;
 
-    const ldBlocks = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g) ?? [];
-    outer: for (const tag of ldBlocks) {
+    // ld+json via DOM (mais confiável que regex no HTML serializado)
+    outer: for (const text of ldJsonTexts) {
       try {
-        const json = JSON.parse(tag.replace(/<script[^>]*>/, '').replace('</script>', ''));
+        const json = JSON.parse(text);
         const nodes = Array.isArray(json) ? json : [json];
         for (const node of nodes) {
           const p = node?.offers?.lowPrice ?? node?.offers?.price ?? null;
@@ -354,6 +383,9 @@ async function scrapePrice(url) {
         if (p > 0 && (!price || p < price)) { price = p; debug = 'melhor-preco'; }
       }
     }
+
+    // Fallback: preço visível no DOM (quando todos os patterns de script falham)
+    if (!price && domPrice && domPrice > 0) { price = domPrice; debug = 'dom'; }
 
     // --- Cupom ML ---
     let cupom = null;
